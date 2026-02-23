@@ -193,3 +193,22 @@ yarn test:shared   # All shared code tests
 - Follow OWASP guidelines.
 - Never store sensitive data in plain text.
 - Use environment variables for secrets.
+
+## Additional Hard Constraints
+
+1. Before any code, configuration, SQL, script, or documentation change, provide a complete execution plan and wait for user approval.
+2. The execution plan must include all intended changes, with no missing files, modules, or steps.
+3. If any requirement or constraint is unclear, ask clarifying questions first, then provide the execution plan.
+4. Do not start any code changes without explicit user permission.
+5. The execution plan must include at least:
+   - Goal and scope (files to change and files/modules explicitly out of scope)
+   - Basis/constraints (specific `docs/*` or repository rules)
+   - Implementation steps (ordered and directly executable)
+   - Layering and transaction boundaries (route/service/repository or equivalent responsibilities)
+   - Testing and acceptance (test cases, commands, expected results)
+   - Rollback plan (recovery steps on failure)
+6. Required pre-work before implementation:
+   - Extract relevant rules from documentation for this task
+   - List non-negotiable constraints (idempotency, authorization, sensitive data handling, transaction boundaries, tenant isolation)
+   - List minimum acceptance test cases
+7. Plan language must be explicit and unambiguous. Avoid vague wording.

@@ -118,7 +118,7 @@ export default class AuthStore extends Store<Team> {
               savePath: false,
               clearCache: false,
               revokeToken: false,
-              userInitiated: true,
+              userInitiated: false,
             });
           }
         } else {

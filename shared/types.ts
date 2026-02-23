@@ -21,6 +21,17 @@ export enum StatusFilter {
   Draft = "draft",
 }
 
+export enum SortFilter {
+  CreatedAt = "createdAt",
+  UpdatedAt = "updatedAt",
+  Title = "title",
+}
+
+export enum DirectionFilter {
+  ASC = "ASC",
+  DESC = "DESC",
+}
+
 export enum CollectionStatusFilter {
   Archived = "archived",
 }
@@ -128,6 +139,7 @@ export enum IntegrationService {
   Matomo = "matomo",
   Umami = "umami",
   GitHub = "github",
+  GitLab = "gitlab",
   Linear = "linear",
   Figma = "figma",
   Notion = "notion",
@@ -144,11 +156,14 @@ export const ImportableIntegrationService = {
 
 export type IssueTrackerIntegrationService = Extract<
   IntegrationService,
-  IntegrationService.GitHub | IntegrationService.Linear
+  | IntegrationService.GitHub
+  | IntegrationService.GitLab
+  | IntegrationService.Linear
 >;
 
 export const IssueTrackerIntegrationService = {
   GitHub: IntegrationService.GitHub,
+  GitLab: IntegrationService.GitLab,
   Linear: IntegrationService.Linear,
 } as const;
 
@@ -159,6 +174,7 @@ export type UserCreatableIntegrationService = Extract<
   | IntegrationService.GoogleAnalytics
   | IntegrationService.Matomo
   | IntegrationService.Umami
+  | IntegrationService.GitLab
 >;
 
 export const UserCreatableIntegrationService = {
@@ -167,6 +183,7 @@ export const UserCreatableIntegrationService = {
   GoogleAnalytics: IntegrationService.GoogleAnalytics,
   Matomo: IntegrationService.Matomo,
   Umami: IntegrationService.Umami,
+  GitLab: IntegrationService.GitLab,
 } as const;
 
 export enum CollectionPermission {
@@ -191,6 +208,13 @@ export type IntegrationSettings<T> = T extends IntegrationType.Embed
       url?: string;
       github?: {
         installation: {
+          id: number;
+          account: { id: number; name: string; avatarUrl: string };
+        };
+      };
+      gitlab?: {
+        url?: string;
+        installation?: {
           id: number;
           account: { id: number; name: string; avatarUrl: string };
         };
@@ -237,6 +261,17 @@ export type IntegrationSettings<T> = T extends IntegrationType.Embed
                         };
                       };
                     };
+                    gitlab?: {
+                      url?: string;
+                      installation?: {
+                        id: number;
+                        account: {
+                          id?: number;
+                          name: string;
+                          avatarUrl?: string;
+                        };
+                      };
+                    };
                     diagrams?: {
                       url: string;
                     };
@@ -260,9 +295,29 @@ export enum UserPreference {
   SortCommentsByOrderInDocument = "sortCommentsByOrderInDocument",
   /** Whether smart text replacements should be enabled. */
   EnableSmartText = "enableSmartText",
+  /** The style of notification badge to display. */
+  NotificationBadge = "notificationBadge",
 }
 
-export type UserPreferences = { [key in UserPreference]?: boolean };
+export enum NotificationBadgeType {
+  /** Do not show a notification badge. */
+  Disabled = "disabled",
+  /** Show the unread notification count. */
+  Count = "count",
+  /** Show an unread indicator dot. */
+  Indicator = "indicator",
+}
+
+export type UserPreferences = {
+  [UserPreference.RememberLastPath]?: boolean;
+  [UserPreference.UseCursorPointer]?: boolean;
+  [UserPreference.CodeBlockLineNumers]?: boolean;
+  [UserPreference.SeamlessEdit]?: boolean;
+  [UserPreference.FullWidthDocuments]?: boolean;
+  [UserPreference.SortCommentsByOrderInDocument]?: boolean;
+  [UserPreference.EnableSmartText]?: boolean;
+  [UserPreference.NotificationBadge]?: NotificationBadgeType;
+};
 
 export type SourceMetadata = {
   /** The original source file name. */
@@ -329,6 +384,8 @@ export enum TeamPreference {
   PreventDocumentEmbedding = "preventDocumentEmbedding",
   /** Who can see user email addresses. */
   EmailDisplay = "emailDisplay",
+  /** Whether external MCP clients can connect to the workspace. */
+  MCP = "mcp",
 }
 
 export type TeamPreferences = {
@@ -344,6 +401,7 @@ export type TeamPreferences = {
   [TeamPreference.TocPosition]?: TOCPosition;
   [TeamPreference.PreventDocumentEmbedding]?: boolean;
   [TeamPreference.EmailDisplay]?: EmailDisplay;
+  [TeamPreference.MCP]?: boolean;
 };
 
 export enum NavigationNodeType {
@@ -586,6 +644,16 @@ export enum IconType {
   SVG = "svg",
   Emoji = "emoji",
   Custom = "custom",
+}
+
+/** Edit modes for document text updates. */
+export enum TextEditMode {
+  /** Replace existing content with new content (default). */
+  Replace = "replace",
+  /** Append new content to the end of the document. */
+  Append = "append",
+  /** Prepend new content to the beginning of the document. */
+  Prepend = "prepend",
 }
 
 export enum EmojiCategory {

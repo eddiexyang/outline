@@ -41,8 +41,25 @@ class ErrorBoundary extends React.Component<Props> {
   @observable
   isRepeatedError = false;
 
+  @observable
+  cspScriptViolation = false;
+
+  @observable
+  cspViolatedDirective: string | undefined;
+
   componentDidMount() {
     this.checkForPreviousErrors();
+    window.addEventListener(
+      "securitypolicyviolation",
+      this.handleSecurityPolicyViolation
+    );
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener(
+      "securitypolicyviolation",
+      this.handleSecurityPolicyViolation
+    );
   }
 
   componentDidCatch(error: Error) {
@@ -103,6 +120,27 @@ class ErrorBoundary extends React.Component<Props> {
     }
   };
 
+  private getOrigin = (url: string | undefined) => {
+    if (!url) {
+      return;
+    }
+
+    try {
+      return new URL(url).origin;
+    } catch (_err) {
+      return;
+    }
+  };
+
+  handleSecurityPolicyViolation = (event: SecurityPolicyViolationEvent) => {
+    if (!event.violatedDirective?.startsWith("script-src")) {
+      return;
+    }
+
+    this.cspScriptViolation = true;
+    this.cspViolatedDirective = event.violatedDirective;
+  };
+
   handleReload = () => {
     window.location.reload();
   };
@@ -131,6 +169,12 @@ class ErrorBoundary extends React.Component<Props> {
         "module script failed",
         "dynamically imported module",
       ].some((msg) => this.error?.message?.includes(msg));
+      const configuredOrigin = this.getOrigin(env.URL);
+      const currentOrigin = window.location.origin;
+      const isOriginMismatch =
+        !isCloudHosted &&
+        !!configuredOrigin &&
+        configuredOrigin !== currentOrigin;
 
       if (isChunkError) {
         return (
@@ -150,6 +194,30 @@ class ErrorBoundary extends React.Component<Props> {
                 failed network request. Please try reloading.
               </Trans>
             </Text>
+            {isOriginMismatch && (
+              <Text as="p" type="secondary">
+                <Trans
+                  defaults="Detected URL origin mismatch. Configured URL origin: <code>{{ configuredOrigin }}</code>. Current browser origin: <code>{{ currentOrigin }}</code>. This can cause scripts to be blocked by Content Security Policy and dynamic modules to fail loading."
+                  values={{
+                    configuredOrigin,
+                    currentOrigin,
+                  }}
+                  components={{ code: <code /> }}
+                />
+              </Text>
+            )}
+            {this.cspScriptViolation && (
+              <Text as="p" type="secondary">
+                <Trans
+                  defaults="A Content Security Policy violation was detected for <code>{{ violatedDirective }}</code>. This indicates the browser blocked a required script."
+                  values={{
+                    violatedDirective:
+                      this.cspViolatedDirective ?? "script-src",
+                  }}
+                  components={{ code: <code /> }}
+                />
+              </Text>
+            )}
             <p>
               <Button onClick={this.handleReload}>{t("Reload")}</Button>
             </p>

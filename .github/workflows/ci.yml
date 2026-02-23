@@ -103,7 +103,7 @@ jobs:
 
   test:
     needs: [setup, changes]
-    if: ${{ needs.changes.outputs.app == 'true' || needs.changes.outputs.config == 'true' }}
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.app == 'true' || needs.changes.outputs.config == 'true' || github.actor == 'nektos/act' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -125,7 +125,7 @@ jobs:
 
   test-server:
     needs: [setup, changes]
-    if: ${{ needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' }}
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' || github.actor == 'nektos/act' }}
     runs-on: ubuntu-latest
     services:
       postgres:

@@ -30,12 +30,7 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
 
   lint:
     needs: setup
@@ -49,12 +44,7 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
       - run: corepack yarn lint --quiet
 
   types:
@@ -69,12 +59,7 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
       - run: corepack yarn tsc
 
   changes:
@@ -105,7 +90,7 @@ jobs:
 
   test:
     needs: [setup, changes]
-    if: ${{ github.event_name == 'push' || needs.changes.outputs.app == 'true' || needs.changes.outputs.config == 'true' || github.actor == 'nektos/act' }}
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.app == 'true' || needs.changes.outputs.config == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -119,17 +104,12 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
       - run: corepack yarn test:${{ matrix.test-group }}
 
   test-server:
     needs: [setup, changes]
-    if: ${{ github.event_name == 'push' || needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' || github.actor == 'nektos/act' }}
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -159,25 +139,16 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
       - run: corepack yarn sequelize db:migrate
       - name: Run server tests
         run: |
           TESTFILES=$(find . -name "*.test.ts" -path "*/server/*" | sort | awk "NR % 4 == (${{ matrix.shard }} - 1)")
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn test:server --runInBand --detectOpenHandles $TESTFILES
-          else
-            corepack yarn test:server --maxWorkers=2 --forceExit $TESTFILES
-          fi
+          corepack yarn test:server --maxWorkers=2 --forceExit $TESTFILES
 
   coverage-server:
     needs: [setup, changes]
-    if: ${{ github.event_name == 'push' || needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' || github.actor == 'nektos/act' }}
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -202,28 +173,17 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
       - run: corepack yarn sequelize db:migrate
       - name: Run server coverage
         run: corepack yarn test:server --maxWorkers=2 --silent --reporters=summary --forceExit --coverage --coverageProvider=v8 --coverageReporters=text-summary --coverageReporters=json-summary --coverageReporters=lcov
       - name: Upload server coverage artifact
-        if: ${{ github.actor != 'nektos/act' }}
         uses: actions/upload-artifact@v4
         with:
           name: server-coverage
           path: |
             coverage/coverage-summary.json
             coverage/lcov.info
-      - name: Verify server coverage files (act)
-        if: ${{ github.actor == 'nektos/act' }}
-        run: |
-          test -f coverage/coverage-summary.json
-          test -f coverage/lcov.info
 
   bundle-size:
     needs: [setup, types, changes]
@@ -238,12 +198,7 @@ jobs:
           node-version: 22.x
           cache: "yarn"
       - name: Install dependencies
-        run: |
-          if [ "${{ github.actor }}" = "nektos/act" ]; then
-            corepack yarn install --immutable --mode=skip-build
-          else
-            corepack yarn install --immutable
-          fi
+        run: corepack yarn install --immutable
       - name: Set environment to production
         run: echo "NODE_ENV=production" >> $GITHUB_ENV
       - run: corepack yarn vite:build

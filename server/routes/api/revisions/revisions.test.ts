@@ -1,5 +1,9 @@
 import { createContext } from "@server/context";
-import { UserMembership, Revision } from "@server/models";
+import { Permission, Revision } from "@server/models";
+import {
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildAdmin,
   buildCollection,
@@ -188,7 +192,7 @@ describe("#revisions.list", () => {
     expect(body.data[0].title).toEqual(document.title);
   });
 
-  it("should not return revisions for document in collection not a member of", async () => {
+  it("should still return revisions for collection owner after membership removal", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
       userId: user.id,
@@ -202,10 +206,13 @@ describe("#revisions.list", () => {
     await Revision.createFromDocument(createContext({ user }), document);
     collection.permission = null;
     await collection.save();
-    await UserMembership.destroy({
+    await Permission.destroy({
       where: {
-        userId: user.id,
-        collectionId: collection.id,
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
       },
     });
     const res = await server.post("/api/revisions.list", {
@@ -214,7 +221,7 @@ describe("#revisions.list", () => {
         documentId: document.id,
       },
     });
-    expect(res.status).toEqual(403);
+    expect(res.status).toEqual(200);
   });
 
   it("should require authorization", async () => {

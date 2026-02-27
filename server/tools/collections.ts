@@ -89,7 +89,7 @@ export function collectionTools(server: McpServer, scopes: string[]) {
             };
 
             const collections = await Collection.scope({
-              method: ["withMembership", user.id],
+              method: ["withPermissionGrants", user.id],
             }).findAll({
               where,
               replacements: { query: `%${query}%` },
@@ -133,6 +133,7 @@ export function collectionTools(server: McpServer, scopes: string[]) {
           const { id } = variables;
           const user = getActorFromContext(extra);
           const collection = await Collection.findByPk(String(id), {
+            userId: user.id,
             includeDocumentStructure: true,
             rejectOnEmpty: true,
           });
@@ -207,7 +208,7 @@ export function collectionTools(server: McpServer, scopes: string[]) {
             color: input.color,
             teamId: user.teamId,
             createdById: user.id,
-            permission: CollectionPermission.ReadWrite,
+            permission: CollectionPermission.Edit,
           });
 
           await collection.saveWithCtx(ctx);

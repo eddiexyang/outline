@@ -45,7 +45,7 @@ function Invite({ onSubmit }: Props) {
   const { t } = useTranslation();
   const predictedDomain = parseEmail(user.email).domain;
   const can = usePolicy(team);
-  const [role, setRole] = React.useState<UserRole>(UserRole.Member);
+  const [role, setRole] = React.useState<UserRole>(UserRole.Editor);
 
   const handleSubmit = React.useCallback(
     async (ev: React.SyntheticEvent) => {
@@ -144,6 +144,12 @@ function Invite({ onSubmit }: Props) {
         description: t("Can manage all workspace settings"),
         value: UserRole.Admin,
       });
+      memo.push({
+        type: "item",
+        label: t("Manager"),
+        description: t("Can manage collections and permissions"),
+        value: UserRole.Manager,
+      });
     }
 
     return [
@@ -152,7 +158,7 @@ function Invite({ onSubmit }: Props) {
         type: "item",
         label: t("Editor"),
         description: t("Can create, edit, and delete documents"),
-        value: UserRole.Member,
+        value: UserRole.Editor,
       },
       {
         type: "item",

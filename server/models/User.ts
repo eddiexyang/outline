@@ -60,8 +60,13 @@ import Collection from "./Collection";
 import Group from "./Group";
 import Team from "./Team";
 import UserAuthentication from "./UserAuthentication";
-import UserMembership from "./UserMembership";
 import UserPasskey from "./UserPasskey";
+import Permission, {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "./Permission";
 import ParanoidModel from "./base/ParanoidModel";
 import Encrypted from "./decorators/Encrypted";
 import Fix from "./decorators/Fix";
@@ -151,7 +156,7 @@ class User extends ParanoidModel<
   @Column
   name: string;
 
-  @Default(UserRole.Member)
+  @Default(UserRole.Editor)
   @Column(DataType.ENUM(...Object.values(UserRole)))
   role: UserRole;
 
@@ -274,10 +279,17 @@ class User extends ParanoidModel<
   }
 
   /**
-   * Whether the user is a member (editor).
+   * Whether the user is a manager.
    */
-  get isMember() {
-    return this.role === UserRole.Member;
+  get isManager() {
+    return this.role === UserRole.Manager;
+  }
+
+  /**
+   * Whether the user is an editor.
+   */
+  get isEditor() {
+    return this.role === UserRole.Editor;
   }
 
   /**
@@ -287,13 +299,6 @@ class User extends ParanoidModel<
     return this.role === UserRole.Viewer;
   }
 
-  /**
-   * Whether the user is a guest.
-   */
-  get isGuest() {
-    return this.role === UserRole.Guest;
-  }
-
   get color() {
     return stringToColor(this.id);
   }
@@ -301,13 +306,13 @@ class User extends ParanoidModel<
   get defaultCollectionPermission(): CollectionPermission {
     return this.isViewer
       ? CollectionPermission.Read
-      : CollectionPermission.ReadWrite;
+      : CollectionPermission.Edit;
   }
 
   get defaultDocumentPermission(): DocumentPermission {
     return this.isViewer
       ? DocumentPermission.Read
-      : DocumentPermission.ReadWrite;
+      : DocumentPermission.Edit;
   }
 
   /**
@@ -471,65 +476,105 @@ class User extends ParanoidModel<
    * @returns An array of collection ids
    */
   public collectionIds = async (options: FindOptions<Collection> = {}) => {
-    const collectionStubs = await Collection.findAll({
-      attributes: ["id"],
+    const groupIds = await this.groupIds({
+      transaction: options.transaction,
+    });
+
+    const permissionConditions = [
+      {
+        subjectType: PermissionSubjectType.User,
+        subjectId: this.id,
+      },
+      {
+        subjectType: PermissionSubjectType.Role,
+        subjectRole: this.role,
+      },
+      ...(groupIds.length
+        ? [
+            {
+              subjectType: PermissionSubjectType.Group,
+              subjectId: {
+                [Op.in]: groupIds,
+              },
+            },
+          ]
+        : []),
+    ];
+
+    const permissions = await Permission.findAll({
+      attributes: ["resourceType", "resourceId", "inheritMode"],
       where: {
         teamId: this.teamId,
-        [Op.or]: [
-          ...(this.isGuest
-            ? []
-            : [
-                {
-                  permission: {
-                    [Op.in]: Object.values(CollectionPermission),
-                  },
-                },
-              ]),
+        deletedAt: null,
+        permission: {
+          [Op.in]: Object.values(PermissionLevel),
+        },
+        [Op.and]: [
           {
-            "$memberships.id$": { [Op.ne]: null },
+            [Op.or]: [
+              {
+                resourceType: PermissionResourceType.Collection,
+                resourceId: {
+                  [Op.ne]: null,
+                },
+              },
+              {
+                resourceType: PermissionResourceType.Workspace,
+                resourceId: null,
+                inheritMode: PermissionInheritMode.Children,
+              },
+            ],
           },
           {
-            "$groupMemberships.id$": { [Op.ne]: null },
+            [Op.or]: permissionConditions,
           },
         ],
       },
-      include: [
-        {
-          association: "memberships",
-          attributes: [],
-          required: false,
-          where: {
-            userId: this.id,
-          },
-        },
-        {
-          association: "groupMemberships",
-          attributes: [],
-          required: false,
-          include: [
-            {
-              association: "group",
-              attributes: [],
-              required: true,
-              include: [
-                {
-                  association: "groupUsers",
-                  attributes: [],
-                  required: true,
-                  where: {
-                    userId: this.id,
-                  },
-                },
-              ],
-            },
-          ],
-        },
-      ],
-      paranoid: true,
-      ...options,
     });
 
-    return Array.from(new Set(collectionStubs.map((c) => c.id)));
+    const permissionCollectionIds = permissions
+      .filter(
+        (permission) =>
+          permission.resourceType === PermissionResourceType.Collection &&
+          permission.resourceId
+      )
+      .map((permission) => permission.resourceId as string);
+
+    const hasWorkspaceAccess = permissions.some(
+      (permission) => permission.resourceType === PermissionResourceType.Workspace
+    );
+
+    let workspaceCollectionIds: string[] = [];
+    if (hasWorkspaceAccess) {
+      const workspaceCollections = await Collection.findAll({
+        attributes: ["id"],
+        where: {
+          teamId: this.teamId,
+        },
+        transaction: options.transaction,
+        paranoid: true,
+      });
+      workspaceCollectionIds = workspaceCollections.map((collection) => collection.id);
+    }
+
+    const ownedCollections = await Collection.findAll({
+      attributes: ["id"],
+      where: {
+        teamId: this.teamId,
+        ownerId: this.id,
+      },
+      transaction: options.transaction,
+      paranoid: true,
+    });
+    const ownedCollectionIds = ownedCollections.map((collection) => collection.id);
+
+    return Array.from(
+      new Set([
+        ...permissionCollectionIds,
+        ...workspaceCollectionIds,
+        ...ownedCollectionIds,
+      ])
+    );
   };
 
   updateActiveAt = async (ctx: Context, force = false) => {
@@ -805,7 +850,7 @@ class User extends ParanoidModel<
   }
 
   @AfterUpdate
-  static async updateMembershipPermissions(
+  static async updatePermissionGrants(
     model: User,
     options: InstanceUpdateOptions<InferAttributes<User>>
   ) {
@@ -814,17 +859,22 @@ class User extends ParanoidModel<
     if (
       previousRole &&
       model.changed("role") &&
-      UserRoleHelper.isRoleLower(model.role, UserRole.Member) &&
+      UserRoleHelper.isRoleLower(model.role, UserRole.Editor) &&
       !UserRoleHelper.isRoleLower(previousRole, UserRole.Viewer)
     ) {
-      await UserMembership.update(
+      await Permission.update(
         {
-          permission: CollectionPermission.Read,
+          permission: PermissionLevel.Read,
         },
         {
           transaction: options.transaction,
           where: {
-            userId: model.id,
+            teamId: model.teamId,
+            subjectType: PermissionSubjectType.User,
+            subjectId: model.id,
+            permission: {
+              [Op.in]: [PermissionLevel.Edit, PermissionLevel.Manage],
+            },
           },
         }
       );

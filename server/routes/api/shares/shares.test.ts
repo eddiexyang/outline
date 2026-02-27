@@ -1,6 +1,11 @@
-import { CollectionPermission } from "@shared/types";
 import { createContext } from "@server/context";
-import { UserMembership, Share } from "@server/models";
+import { Share, Permission } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildUser,
   buildDocument,
@@ -197,7 +202,7 @@ describe("#shares.list", () => {
     expect(body.data[0].documentTitle).toBe(document.title);
   });
 
-  it("admins should not return shares in collection not a member of", async () => {
+  it("admins should return shares in collection even without explicit grant", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const admin = await buildAdmin({ teamId: team.id });
@@ -224,7 +229,7 @@ describe("#shares.list", () => {
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
-    expect(body.data.length).toEqual(0);
+    expect(body.data.length).toEqual(1);
   });
 
   it("should require authentication", async () => {
@@ -347,30 +352,29 @@ describe("#shares.create", () => {
 
   it("should fail creating a share record with read-only permissions and publishing", async () => {
     const team = await buildTeam();
+    const owner = await buildUser({ teamId: team.id });
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
-      userId: user.id,
+      userId: owner.id,
       teamId: team.id,
+      permission: null,
     });
     const document = await buildDocument({
-      userId: user.id,
+      userId: owner.id,
       collectionId: collection.id,
       teamId: team.id,
     });
-    collection.permission = null;
-    await collection.save();
-    await UserMembership.update(
-      {
-        userId: user.id,
-        permission: CollectionPermission.Read,
-      },
-      {
-        where: {
-          createdById: user.id,
-          collectionId: collection.id,
-        },
-      }
-    );
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: owner.id,
+    });
     const res = await server.post("/api/shares.create", {
       body: {
         token: user.getJwtToken(),
@@ -381,48 +385,38 @@ describe("#shares.create", () => {
     expect(res.status).toEqual(403);
   });
 
-  it("should allow creating a share record with read-only permissions but not publishing", async () => {
+  it("should fail creating a share record with read-only permissions", async () => {
     const team = await buildTeam();
+    const owner = await buildUser({ teamId: team.id });
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
-      userId: user.id,
+      userId: owner.id,
       teamId: team.id,
+      permission: null,
     });
     const document = await buildDocument({
-      userId: user.id,
+      userId: owner.id,
       collectionId: collection.id,
       teamId: team.id,
     });
-    collection.permission = null;
-    await collection.save();
-    await UserMembership.update(
-      {
-        userId: user.id,
-        permission: CollectionPermission.Read,
-      },
-      {
-        where: {
-          createdById: user.id,
-          collectionId: collection.id,
-        },
-      }
-    );
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: owner.id,
+    });
     const res = await server.post("/api/shares.create", {
       body: {
         token: user.getJwtToken(),
         documentId: document.id,
       },
     });
-    const body = await res.json();
-    expect(res.status).toEqual(200);
-    const response = await server.post("/api/shares.update", {
-      body: {
-        token: user.getJwtToken(),
-        id: body.data.id,
-        published: true,
-      },
-    });
-    expect(response.status).toEqual(403);
+    expect(res.status).toEqual(403);
   });
 
   it("should allow creating a share record if link previously revoked", async () => {
@@ -471,7 +465,7 @@ describe("#shares.create", () => {
     expect(body.data.id).toBe(share.id);
   });
 
-  it("should allow creating a share record if team sharing disabled but not publishing", async () => {
+  it("should block creating a share record if team sharing is disabled", async () => {
     const team = await buildTeam({ sharing: false });
     const user = await buildUser({ teamId: team.id });
     const document = await buildDocument({
@@ -484,19 +478,10 @@ describe("#shares.create", () => {
         documentId: document.id,
       },
     });
-    const body = await res.json();
-    expect(res.status).toEqual(200);
-    const response = await server.post("/api/shares.update", {
-      body: {
-        token: user.getJwtToken(),
-        id: body.data.id,
-        published: true,
-      },
-    });
-    expect(response.status).toEqual(403);
+    expect(res.status).toEqual(403);
   });
 
-  it("should allow creating a share record if collection sharing disabled but not publishing", async () => {
+  it("should block creating a share record if collection sharing is disabled", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
       userId: user.id,
@@ -514,16 +499,7 @@ describe("#shares.create", () => {
         documentId: document.id,
       },
     });
-    const body = await res.json();
-    expect(res.status).toEqual(200);
-    const response = await server.post("/api/shares.update", {
-      body: {
-        token: user.getJwtToken(),
-        id: body.data.id,
-        published: true,
-      },
-    });
-    expect(response.status).toEqual(403);
+    expect(res.status).toEqual(403);
   });
 
   it("should require authentication", async () => {

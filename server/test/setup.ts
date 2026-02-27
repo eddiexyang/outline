@@ -39,7 +39,10 @@ jest.mock("@aws-sdk/s3-request-presigner", () => ({
 require("@server/storage/database");
 
 // Import Redis after mocking
-const Redis = require("ioredis");
+const IORedis = require("ioredis");
+const RedisAdapter = require("@server/storage/redis").default;
+const { closeAllQueuesForTest } = require("@server/queues");
+const ShutdownHelper = require("@server/utils/ShutdownHelper").default;
 
 beforeEach(() => {
   env.URL = sharedEnv.URL = "https://app.outline.dev";
@@ -47,7 +50,13 @@ beforeEach(() => {
 
 afterEach(async () => {
   // Create a new Redis instance for cleanup
-  const redis = new Redis();
+  const redis = new IORedis();
   await redis.flushall();
   redis.disconnect();
+});
+
+afterAll(async () => {
+  await ShutdownHelper.executeForTest();
+  await closeAllQueuesForTest();
+  await RedisAdapter.disconnectAll();
 });

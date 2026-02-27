@@ -175,7 +175,7 @@ describe("#team.update", () => {
     expect(await TeamDomain.findByPk(existingTeamDomain.id)).toBeNull();
   });
 
-  it("should only allow member,viewer or admin as default role", async () => {
+  it("should only allow editor or viewer as default role", async () => {
     const admin = await buildAdmin();
     const res = await server.post("/api/team.update", {
       body: {
@@ -184,6 +184,20 @@ describe("#team.update", () => {
       },
     });
     expect(res.status).toEqual(400);
+    const managerRes = await server.post("/api/team.update", {
+      body: {
+        token: admin.getJwtToken(),
+        defaultUserRole: "manager",
+      },
+    });
+    expect(managerRes.status).toEqual(400);
+    const adminRoleRes = await server.post("/api/team.update", {
+      body: {
+        token: admin.getJwtToken(),
+        defaultUserRole: "admin",
+      },
+    });
+    expect(adminRoleRes.status).toEqual(400);
     const successRes = await server.post("/api/team.update", {
       body: {
         token: admin.getJwtToken(),

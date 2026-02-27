@@ -1,9 +1,9 @@
 /** Available user roles. */
 export enum UserRole {
   Admin = "admin",
-  Member = "member",
+  Manager = "manager",
+  Editor = "editor",
   Viewer = "viewer",
-  Guest = "guest",
 }
 
 /** Scopes for OAuth and API keys. */
@@ -188,14 +188,14 @@ export const UserCreatableIntegrationService = {
 
 export enum CollectionPermission {
   Read = "read",
-  ReadWrite = "read_write",
-  Admin = "admin",
+  Edit = "read_write",
+  Manage = "admin",
 }
 
 export enum DocumentPermission {
   Read = "read",
-  ReadWrite = "read_write",
-  Admin = "admin",
+  Edit = "read_write",
+  Manage = "admin",
 }
 
 export enum GroupPermission {

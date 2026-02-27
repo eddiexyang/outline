@@ -8,11 +8,16 @@ import {
   buildTeam,
   buildCollection,
   buildAdmin,
+  buildManager,
   buildViewer,
-  buildGuestUser,
 } from "@server/test/factories";
 import User from "./User";
-import UserMembership from "./UserMembership";
+import Permission, {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "./Permission";
 
 beforeAll(() => {
   jest.useFakeTimers().setSystemTime(new Date("2018-01-02T00:00:00.000Z"));
@@ -182,7 +187,7 @@ describe("user model", () => {
       });
       const collection = await buildCollection({
         teamId: team.id,
-        permission: CollectionPermission.ReadWrite,
+        permission: CollectionPermission.Edit,
       });
       const response = await user.collectionIds();
       expect(response.length).toEqual(1);
@@ -216,7 +221,20 @@ describe("user model", () => {
       expect(response.length).toEqual(0);
     });
 
-    it("should not return private collection with membership", async () => {
+    it("should not return private collection without explicit permission grant", async () => {
+      const team = await buildTeam();
+      const user = await buildUser({
+        teamId: team.id,
+      });
+      await buildCollection({
+        teamId: team.id,
+        permission: null,
+      });
+      const response = await user.collectionIds();
+      expect(response.length).toEqual(0);
+    });
+
+    it("should include private collection with explicit permission grant", async () => {
       const team = await buildTeam();
       const user = await buildUser({
         teamId: team.id,
@@ -225,19 +243,59 @@ describe("user model", () => {
         teamId: team.id,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: user.id,
-        collectionId: collection.id,
-        userId: user.id,
-        permission: CollectionPermission.Read,
+
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
       });
+
       const response = await user.collectionIds();
-      expect(response.length).toEqual(1);
-      expect(response[0]).toEqual(collection.id);
+      expect(response).toContain(collection.id);
+    });
+
+    it("should include all collections with workspace children grant", async () => {
+      const team = await buildTeam();
+      const user = await buildUser({
+        teamId: team.id,
+      });
+      const [collectionA, collectionB] = await Promise.all([
+        buildCollection({
+          teamId: team.id,
+          permission: null,
+        }),
+        buildCollection({
+          teamId: team.id,
+          permission: CollectionPermission.Read,
+        }),
+      ]);
+
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Workspace,
+        resourceId: null,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
+      });
+
+      const response = await user.collectionIds();
+      expect(response).toEqual(
+        expect.arrayContaining([collectionA.id, collectionB.id])
+      );
     });
   });
 
-  describe("updateMembershipPermissions", () => {
+  describe("updatePermissionGrants", () => {
     it("should downgrade permissions when demoting Admin to Viewer", async () => {
       const admin = await buildAdmin();
       // Ensure there's another admin so we can demote this one
@@ -246,46 +304,66 @@ describe("user model", () => {
         teamId: admin.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: admin.id,
-        collectionId: collection.id,
-        userId: admin.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: admin.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: admin.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: admin.id,
       });
 
       await sequelize.transaction(async (transaction) => {
         await admin.update({ role: UserRole.Viewer }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: admin.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: admin.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: admin.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.Read);
+      expect(grant?.permission).toEqual(PermissionLevel.Read);
     });
 
-    it("should downgrade permissions when demoting Admin to Guest", async () => {
-      const admin = await buildAdmin();
-      // Ensure there's another admin so we can demote this one
-      await buildAdmin({ teamId: admin.teamId });
+    it("should downgrade permissions when demoting Manager to Viewer", async () => {
+      const admin = await buildManager();
       const collection = await buildCollection({
         teamId: admin.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: admin.id,
-        collectionId: collection.id,
-        userId: admin.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: admin.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: admin.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: admin.id,
       });
 
       await sequelize.transaction(async (transaction) => {
-        await admin.update({ role: UserRole.Guest }, { transaction });
+        await admin.update({ role: UserRole.Viewer }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: admin.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: admin.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: admin.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.Read);
+      expect(grant?.permission).toEqual(PermissionLevel.Read);
     });
 
     it("should downgrade permissions when demoting Member to Viewer", async () => {
@@ -294,90 +372,134 @@ describe("user model", () => {
         teamId: user.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: user.id,
-        collectionId: collection.id,
-        userId: user.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
       });
 
       await sequelize.transaction(async (transaction) => {
         await user.update({ role: UserRole.Viewer }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: user.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: user.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: user.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.Read);
+      expect(grant?.permission).toEqual(PermissionLevel.Read);
     });
 
-    it("should downgrade permissions when demoting Member to Guest", async () => {
+    it("should downgrade permissions when demoting Editor to Viewer", async () => {
       const user = await buildUser();
       const collection = await buildCollection({
         teamId: user.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: user.id,
-        collectionId: collection.id,
-        userId: user.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Manage,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
       });
 
       await sequelize.transaction(async (transaction) => {
-        await user.update({ role: UserRole.Guest }, { transaction });
+        await user.update({ role: UserRole.Viewer }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: user.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: user.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: user.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.Read);
+      expect(grant?.permission).toEqual(PermissionLevel.Read);
     });
 
-    it("should downgrade permissions when demoting Viewer to Guest", async () => {
+    it("should not downgrade permissions when role does not change", async () => {
       const viewer = await buildViewer();
       const collection = await buildCollection({
         teamId: viewer.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: viewer.id,
-        collectionId: collection.id,
-        userId: viewer.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: viewer.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: viewer.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: viewer.id,
       });
 
       await sequelize.transaction(async (transaction) => {
-        await viewer.update({ role: UserRole.Guest }, { transaction });
+        await viewer.update({ role: UserRole.Viewer }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: viewer.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: viewer.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: viewer.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.Read);
+      expect(grant?.permission).toEqual(PermissionLevel.Edit);
     });
 
-    it("should not downgrade permissions when promoting Guest to Viewer", async () => {
-      const guest = await buildGuestUser();
+    it("should not downgrade permissions when promoting Viewer to Editor", async () => {
+      const guest = await buildViewer();
       const collection = await buildCollection({
         teamId: guest.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: guest.id,
-        collectionId: collection.id,
-        userId: guest.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: guest.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: guest.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: guest.id,
       });
 
       await sequelize.transaction(async (transaction) => {
-        await guest.update({ role: UserRole.Viewer }, { transaction });
+        await guest.update({ role: UserRole.Editor }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: guest.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: guest.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: guest.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.ReadWrite);
+      expect(grant?.permission).toEqual(PermissionLevel.Edit);
     });
 
     it("should not downgrade permissions when promoting Viewer to Member", async () => {
@@ -386,21 +508,32 @@ describe("user model", () => {
         teamId: viewer.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: viewer.id,
-        collectionId: collection.id,
-        userId: viewer.id,
-        permission: CollectionPermission.Read,
+      await Permission.create({
+        teamId: viewer.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: viewer.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: viewer.id,
       });
 
       await sequelize.transaction(async (transaction) => {
-        await viewer.update({ role: UserRole.Member }, { transaction });
+        await viewer.update({ role: UserRole.Editor }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: viewer.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: viewer.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: viewer.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.Read);
+      expect(grant?.permission).toEqual(PermissionLevel.Read);
     });
 
     it("should not downgrade permissions when demoting Admin to Member", async () => {
@@ -411,21 +544,32 @@ describe("user model", () => {
         teamId: admin.teamId,
         permission: null,
       });
-      await UserMembership.create({
-        createdById: admin.id,
-        collectionId: collection.id,
-        userId: admin.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: admin.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: admin.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: admin.id,
       });
 
       await sequelize.transaction(async (transaction) => {
-        await admin.update({ role: UserRole.Member }, { transaction });
+        await admin.update({ role: UserRole.Editor }, { transaction });
       });
 
-      const membership = await UserMembership.findOne({
-        where: { userId: admin.id, collectionId: collection.id },
+      const grant = await Permission.findOne({
+        where: {
+          teamId: admin.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: admin.id,
+          resourceType: PermissionResourceType.Collection,
+          resourceId: collection.id,
+        },
       });
-      expect(membership?.permission).toEqual(CollectionPermission.ReadWrite);
+      expect(grant?.permission).toEqual(PermissionLevel.Edit);
     });
   });
 });

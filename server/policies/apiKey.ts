@@ -15,7 +15,7 @@ allow(User, "createApiKey", Team, (actor, team) =>
     isTeamModel(actor, team),
     isTeamMutable(actor),
     !actor.isViewer,
-    !actor.isGuest,
+    !actor.isViewer,
     !actor.isSuspended,
     actor.isAdmin ||
       !!team?.getPreference(TeamPreference.MembersCanCreateApiKey)

@@ -246,7 +246,7 @@ async function provisionFirstCollection(
       teamId: team.id,
       createdById: user.id,
       sort: Collection.DEFAULT_SORT,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
     });
 
     // For the first collection we go ahead and create some initial documents to get

@@ -50,11 +50,11 @@ const DocumentMemberListItem = ({
     },
     {
       label: t("Can edit"),
-      value: DocumentPermission.ReadWrite,
+      value: DocumentPermission.Edit,
     },
     {
       label: t("Manage"),
-      value: DocumentPermission.Admin,
+      value: DocumentPermission.Manage,
     },
     {
       divider: true,

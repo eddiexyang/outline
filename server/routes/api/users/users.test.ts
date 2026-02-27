@@ -250,7 +250,7 @@ describe("#users.list", () => {
   it("should restrict guest from viewing other user's email", async () => {
     const team = await buildTeam();
     await buildUser({ teamId: team.id });
-    const guest = await buildUser({ teamId: team.id, role: UserRole.Guest });
+    const guest = await buildUser({ teamId: team.id, role: UserRole.Viewer });
     const res = await server.post("/api/users.list", {
       body: {
         token: guest.getJwtToken(),
@@ -282,7 +282,7 @@ describe("#users.list", () => {
   it("should allow member to view other user's email", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
-    const member = await buildUser({ teamId: team.id, role: UserRole.Member });
+    const member = await buildUser({ teamId: team.id, role: UserRole.Editor });
     const res = await server.post("/api/users.list", {
       body: {
         token: member.getJwtToken(),
@@ -298,7 +298,7 @@ describe("#users.list", () => {
   it("should restrict guest from viewing other user's details", async () => {
     const team = await buildTeam();
     await buildUser({ teamId: team.id });
-    const guest = await buildUser({ teamId: team.id, role: UserRole.Guest });
+    const guest = await buildUser({ teamId: team.id, role: UserRole.Viewer });
     const res = await server.post("/api/users.list", {
       body: {
         token: guest.getJwtToken(),
@@ -342,7 +342,7 @@ describe("#users.list", () => {
   it("should restrict member from viewing other user's details", async () => {
     const team = await buildTeam();
     await buildUser({ teamId: team.id });
-    const member = await buildUser({ teamId: team.id, role: UserRole.Member });
+    const member = await buildUser({ teamId: team.id, role: UserRole.Editor });
     const res = await server.post("/api/users.list", {
       body: {
         token: member.getJwtToken(),
@@ -448,7 +448,7 @@ describe("#users.invite", () => {
           {
             email: "test@example.com",
             name: "Test",
-            role: "member",
+            role: "editor",
           },
         ],
       },
@@ -466,7 +466,7 @@ describe("#users.invite", () => {
         invites: {
           email: "test@example.com",
           name: "Test",
-          role: "member",
+          role: "editor",
         },
       },
     });
@@ -482,7 +482,7 @@ describe("#users.invite", () => {
           {
             email: "test@example.com",
             name: "Test",
-            role: "member",
+            role: "editor",
           },
         ],
       },
@@ -501,7 +501,7 @@ describe("#users.invite", () => {
           {
             email: "test@example.com",
             name: "Test",
-            role: "member",
+            role: "editor",
           },
         ],
       },
@@ -522,7 +522,7 @@ describe("#users.invite", () => {
           {
             email: "test@example.com",
             name: "Test",
-            role: "member",
+            role: "editor",
           },
         ],
       },
@@ -959,7 +959,7 @@ describe("#users.demote", () => {
       body: {
         token: admin.getJwtToken(),
         id: user.id,
-        to: "member",
+        to: "editor",
       },
     });
     expect(res.status).toEqual(200);

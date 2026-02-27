@@ -101,11 +101,11 @@ export const AccessControlList = observer(
           },
           {
             label: t("Can edit"),
-            value: CollectionPermission.ReadWrite,
+            value: CollectionPermission.Edit,
           },
           {
             label: t("Manage"),
-            value: CollectionPermission.Admin,
+            value: CollectionPermission.Manage,
           },
           {
             divider: true,

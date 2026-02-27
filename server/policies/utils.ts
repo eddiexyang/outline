@@ -81,6 +81,20 @@ export function isTeamAdmin(
 }
 
 /**
+ * Check if the actor is an admin or manager of the team.
+ *
+ * @param actor The actor to check
+ * @param model The model to check
+ * @returns True if the actor is an admin/manager of the team the model belongs to
+ */
+export function isTeamManager(
+  actor: User,
+  model: Model | null | undefined
+): model is Model {
+  return !!and(isTeamModel(actor, model), or(actor.isAdmin, actor.isManager));
+}
+
+/**
  * Check if the actor is a member of the team.
  *
  * @param actor The actor to check
@@ -88,7 +102,10 @@ export function isTeamAdmin(
  * @returns True if the actor is a member of the team the model belongs to
  */
 export function isTeamMember(actor: User, model: Model | null | undefined) {
-  return !!and(isTeamModel(actor, model), actor.isMember);
+  return !!and(
+    isTeamModel(actor, model),
+    or(actor.isEditor, actor.isManager)
+  );
 }
 
 /**

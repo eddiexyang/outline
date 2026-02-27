@@ -2,24 +2,29 @@ import concat from "lodash/concat";
 import uniq from "lodash/uniq";
 import uniqBy from "lodash/uniqBy";
 import type { Server } from "socket.io";
+import { CollectionPermission, DocumentPermission } from "@shared/types";
 import {
   Comment,
   Document,
   Collection,
   FileOperation,
   Group,
-  GroupMembership,
   GroupUser,
+  Permission,
   Pin,
   Star,
   Team,
   Subscription,
   Notification,
-  UserMembership,
   User,
   Import,
   Template,
 } from "@server/models";
+import {
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import { cannot } from "@server/policies";
 import {
   presentComment,
@@ -31,9 +36,7 @@ import {
   presentStar,
   presentSubscription,
   presentTeam,
-  presentMembership,
   presentUser,
-  presentGroupMembership,
   presentGroupUser,
   presentImport,
 } from "@server/presenters";
@@ -240,16 +243,23 @@ export default class WebsocketsProcessor {
       }
 
       case "documents.add_user": {
-        const [document, membership] = await Promise.all([
+        const [document, permission] = await Promise.all([
           Document.findByPk(event.documentId),
-          UserMembership.findByPk(event.modelId),
+          Permission.findByPk(event.modelId),
         ]);
-        if (!document || !membership) {
+        if (
+          !document ||
+          !permission ||
+          permission.subjectType !== PermissionSubjectType.User ||
+          permission.subjectId === null
+        ) {
           return;
         }
 
         const channels = await this.getDocumentEventChannels(event, document);
-        socketio.to(channels).emit(event.name, presentMembership(membership));
+        socketio
+          .to(channels)
+          .emit(event.name, this.presentDocumentUserPermission(permission));
         return;
       }
 
@@ -269,18 +279,26 @@ export default class WebsocketsProcessor {
       }
 
       case "documents.add_group": {
-        const [document, membership] = await Promise.all([
+        const permissionId =
+          (event.data?.membershipId as string | undefined) ?? event.modelId;
+        const [document, permission] = await Promise.all([
           Document.findByPk(event.documentId),
-          GroupMembership.findByPk(event.data.membershipId),
+          Permission.findByPk(permissionId),
         ]);
-        if (!document || !membership) {
+        if (
+          !document ||
+          !permission ||
+          permission.subjectType !== PermissionSubjectType.Group ||
+          permission.subjectId === null
+        ) {
           return;
         }
 
         const channels = await this.getDocumentEventChannels(event, document);
-        socketio
-          .to(channels)
-          .emit(event.name, presentGroupMembership(membership));
+        socketio.to(channels).emit(
+          event.name,
+          this.presentDocumentGroupPermission(permission)
+        );
         return;
       }
 
@@ -380,16 +398,20 @@ export default class WebsocketsProcessor {
       }
 
       case "collections.add_user": {
-        const membership = await UserMembership.findByPk(event.modelId);
-        if (!membership) {
+        const permission = await Permission.findByPk(event.modelId);
+        if (
+          !permission ||
+          permission.subjectType !== PermissionSubjectType.User ||
+          permission.subjectId === null
+        ) {
           return;
         }
         // the user being added isn't yet in the websocket channel for the collection
         // so they need to be notified separately
         socketio
-          .to(`user-${membership.userId}`)
-          .to(`collection-${membership.collectionId}`)
-          .emit(event.name, presentMembership(membership));
+          .to(`user-${permission.subjectId}`)
+          .to(`collection-${permission.resourceId}`)
+          .emit(event.name, this.presentCollectionUserPermission(permission));
 
         // tell any user clients to connect to the websocket channel for the collection
         socketio.to(`user-${event.userId}`).emit("join", {
@@ -433,19 +455,23 @@ export default class WebsocketsProcessor {
       }
 
       case "collections.add_group": {
-        const membership = await GroupMembership.findByPk(
-          event.data.membershipId
-        );
-        if (!membership) {
+        const permissionId =
+          (event.data?.membershipId as string | undefined) ?? event.modelId;
+        const permission = await Permission.findByPk(permissionId);
+        if (
+          !permission ||
+          permission.subjectType !== PermissionSubjectType.Group ||
+          permission.subjectId === null
+        ) {
           return;
         }
 
         socketio
-          .to(`group-${membership.groupId}`)
-          .to(`collection-${membership.collectionId}`)
-          .emit(event.name, presentGroupMembership(membership));
+          .to(`group-${permission.subjectId}`)
+          .to(`collection-${permission.resourceId}`)
+          .emit(event.name, this.presentCollectionGroupPermission(permission));
 
-        socketio.to(`group-${membership.groupId}`).emit("join", {
+        socketio.to(`group-${permission.subjectId}`).emit("join", {
           event: event.name,
           collectionId: event.collectionId,
         });
@@ -684,36 +710,40 @@ export default class WebsocketsProcessor {
           groupId: event.modelId,
         });
 
-        await GroupMembership.findAllInBatches<GroupMembership>(
+        await Permission.findAllInBatches<Permission>(
           {
             where: {
-              groupId: event.modelId,
+              subjectType: PermissionSubjectType.Group,
+              subjectId: event.modelId,
+              deletedAt: null,
             },
             batchLimit: 100,
           },
-          async (groupMemberships) => {
-            for (const groupMembership of groupMemberships) {
-              if (groupMembership.collectionId) {
-                socketio
-                  .to(`user-${event.userId}`)
-                  .emit(
-                    "collections.add_group",
-                    presentGroupMembership(groupMembership)
-                  );
+          async (permissions) => {
+            for (const permission of permissions) {
+              if (
+                permission.resourceType === PermissionResourceType.Collection &&
+                permission.resourceId
+              ) {
+                socketio.to(`user-${event.userId}`).emit(
+                  "collections.add_group",
+                  this.presentCollectionGroupPermission(permission)
+                );
 
-                // tell any user clients to connect to the websocket channel for the collection
                 socketio.to(`user-${event.userId}`).emit("join", {
                   event: event.name,
-                  collectionId: groupMembership.collectionId,
+                  collectionId: permission.resourceId,
                 });
               }
-              if (groupMembership.documentId) {
-                socketio
-                  .to(`user-${event.userId}`)
-                  .emit(
-                    "documents.add_group",
-                    presentGroupMembership(groupMembership)
-                  );
+
+              if (
+                permission.resourceType === PermissionResourceType.Document &&
+                permission.resourceId
+              ) {
+                socketio.to(`user-${event.userId}`).emit(
+                  "documents.add_group",
+                  this.presentDocumentGroupPermission(permission)
+                );
               }
             }
           }
@@ -744,38 +774,35 @@ export default class WebsocketsProcessor {
           return;
         }
 
-        await GroupMembership.findAllInBatches<GroupMembership>(
+        await Permission.findAllInBatches<Permission>(
           {
             where: {
-              groupId: event.modelId,
+              subjectType: PermissionSubjectType.Group,
+              subjectId: event.modelId,
+              resourceType: PermissionResourceType.Collection,
+              deletedAt: null,
             },
             batchLimit: 100,
           },
-          async (groupMemberships) => {
-            for (const groupMembership of groupMemberships) {
-              if (!groupMembership.collectionId) {
+          async (permissions) => {
+            for (const permission of permissions) {
+              if (!permission.resourceId) {
                 continue;
               }
 
-              socketio
-                .to(`user-${event.userId}`)
-                .emit(
-                  "collections.remove_group",
-                  presentGroupMembership(groupMembership)
-                );
-
-              const collection = await Collection.findByPk(
-                groupMembership.collectionId,
-                {
-                  userId: event.userId,
-                }
+              socketio.to(`user-${event.userId}`).emit(
+                "collections.remove_group",
+                this.presentCollectionGroupPermission(permission)
               );
 
+              const collection = await Collection.findByPk(permission.resourceId, {
+                userId: event.userId,
+              });
+
               if (cannot(user, "read", collection)) {
-                // tell any user clients to disconnect from the websocket channel for the collection
                 socketio.to(`user-${event.userId}`).emit("leave", {
                   event: event.name,
-                  collectionId: groupMembership.collectionId,
+                  collectionId: permission.resourceId,
                 });
               }
             }
@@ -794,9 +821,11 @@ export default class WebsocketsProcessor {
           groupId: event.modelId,
         });
 
-        const groupMemberships = await GroupMembership.findAll({
+        const groupPermissions = await Permission.findAll({
           where: {
-            groupId: event.modelId,
+            subjectType: PermissionSubjectType.Group,
+            subjectId: event.modelId,
+            deletedAt: null,
           },
         });
 
@@ -814,33 +843,36 @@ export default class WebsocketsProcessor {
             batchLimit: 100,
           },
           async (groupUsers) => {
-            for (const groupMembership of groupMemberships) {
-              const payload = presentGroupMembership(groupMembership);
-
-              if (groupMembership.collectionId) {
+            for (const permission of groupPermissions) {
+              if (
+                permission.resourceType === PermissionResourceType.Collection &&
+                permission.resourceId
+              ) {
+                const payload = this.presentCollectionGroupPermission(permission);
                 for (const groupUser of groupUsers) {
                   socketio
                     .to(`user-${groupUser.userId}`)
                     .emit("collections.remove_group", payload);
 
-                  const collection = await Collection.findByPk(
-                    groupMembership.collectionId,
-                    {
-                      userId: groupUser.userId,
-                    }
-                  );
+                  const collection = await Collection.findByPk(permission.resourceId, {
+                    userId: groupUser.userId,
+                  });
 
                   if (cannot(groupUser.user, "read", collection)) {
                     // tell any user clients to disconnect from the websocket channel for the collection
                     socketio.to(`user-${groupUser.userId}`).emit("leave", {
                       event: event.name,
-                      collectionId: groupMembership.collectionId,
+                      collectionId: permission.resourceId,
                     });
                   }
                 }
               }
 
-              if (groupMembership.documentId) {
+              if (
+                permission.resourceType === PermissionResourceType.Document &&
+                permission.resourceId
+              ) {
+                const payload = this.presentDocumentGroupPermission(permission);
                 for (const groupUser of groupUsers) {
                   socketio
                     .to(`user-${groupUser.userId}`)
@@ -935,6 +967,74 @@ export default class WebsocketsProcessor {
     return channels;
   }
 
+  private levelToCollectionPermission(level: PermissionLevel) {
+    if (level === PermissionLevel.Manage) {
+      return CollectionPermission.Manage;
+    }
+    if (level === PermissionLevel.Edit) {
+      return CollectionPermission.Edit;
+    }
+    return CollectionPermission.Read;
+  }
+
+  private levelToDocumentPermission(level: PermissionLevel) {
+    if (level === PermissionLevel.Manage) {
+      return DocumentPermission.Manage;
+    }
+    if (level === PermissionLevel.Edit) {
+      return DocumentPermission.Edit;
+    }
+    return DocumentPermission.Read;
+  }
+
+  private presentCollectionUserPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      userId: permission.subjectId!,
+      collectionId: permission.resourceId!,
+      documentId: null,
+      permission: this.levelToCollectionPermission(permission.permission),
+      createdById: permission.grantedById,
+      sourceId: null,
+      index: null,
+    };
+  }
+
+  private presentCollectionGroupPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      groupId: permission.subjectId!,
+      collectionId: permission.resourceId!,
+      documentId: null,
+      permission: this.levelToCollectionPermission(permission.permission),
+      sourceId: null,
+    };
+  }
+
+  private presentDocumentUserPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      userId: permission.subjectId!,
+      documentId: permission.resourceId!,
+      collectionId: null,
+      permission: this.levelToDocumentPermission(permission.permission),
+      createdById: permission.grantedById,
+      sourceId: null,
+      index: null,
+    };
+  }
+
+  private presentDocumentGroupPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      groupId: permission.subjectId!,
+      documentId: permission.resourceId!,
+      collectionId: null,
+      permission: this.levelToDocumentPermission(permission.permission),
+      sourceId: null,
+    };
+  }
+
   private async getDocumentEventChannels(
     event: Event,
     document: Document
@@ -955,25 +1055,35 @@ export default class WebsocketsProcessor {
       }
     }
 
-    const [userMemberships, groupMemberships] = await Promise.all([
-      UserMembership.findAll({
+    const [userPermissions, groupPermissions] = await Promise.all([
+      Permission.findAll({
         where: {
-          documentId: document.id,
+          resourceType: PermissionResourceType.Document,
+          resourceId: document.id,
+          subjectType: PermissionSubjectType.User,
+          deletedAt: null,
         },
       }),
-      GroupMembership.findAll({
+      Permission.findAll({
         where: {
-          documentId: document.id,
+          resourceType: PermissionResourceType.Document,
+          resourceId: document.id,
+          subjectType: PermissionSubjectType.Group,
+          deletedAt: null,
         },
       }),
     ]);
 
-    for (const membership of userMemberships) {
-      channels.push(`user-${membership.userId}`);
+    for (const permission of userPermissions) {
+      if (permission.subjectId) {
+        channels.push(`user-${permission.subjectId}`);
+      }
     }
 
-    for (const membership of groupMemberships) {
-      channels.push(`group-${membership.groupId}`);
+    for (const permission of groupPermissions) {
+      if (permission.subjectId) {
+        channels.push(`group-${permission.subjectId}`);
+      }
     }
 
     return uniq(channels);

@@ -181,7 +181,7 @@ router.post(
       include: [
         {
           model: Collection.scope({
-            method: ["withMembership", user.id],
+            method: ["withPermissionGrants", user.id],
           }),
           as: "collection",
           required: false,
@@ -194,7 +194,7 @@ router.post(
           include: [
             {
               model: Collection.scope({
-                method: ["withMembership", user.id],
+                method: ["withPermissionGrants", user.id],
               }),
               as: "collection",
             },
@@ -262,13 +262,8 @@ router.post(
         })
       : null;
 
-    // user could be creating the share link to share with team members
-    authorize(user, "read", collectionId ? collection : document);
-
-    if (published) {
-      authorize(user, "share", user.team);
-      authorize(user, "share", collectionId ? collection : document);
-    }
+    authorize(user, "share", user.team);
+    authorize(user, "share", collectionId ? collection : document);
 
     const [share] = await Share.findOrCreateWithCtx(ctx, {
       where: {

@@ -102,9 +102,9 @@ export function userTools(server: McpServer, scopes: string[]) {
           role: z
             .enum([
               UserRole.Admin,
-              UserRole.Member,
+              UserRole.Manager,
+              UserRole.Editor,
               UserRole.Viewer,
-              UserRole.Guest,
             ])
             .optional()
             .describe("Filter users by role."),

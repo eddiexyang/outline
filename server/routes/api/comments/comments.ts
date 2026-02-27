@@ -144,7 +144,10 @@ router.post(
 
     const params: FindOptions<Comment> = {
       where,
-      order: [[sort, direction]],
+      order: [
+        [sort, direction],
+        ["id", "ASC"],
+      ],
       offset: ctx.state.pagination.offset,
       limit: ctx.state.pagination.limit,
     };

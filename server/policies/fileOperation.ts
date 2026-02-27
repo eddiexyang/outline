@@ -1,17 +1,17 @@
 import { FileOperationState, FileOperationType } from "@shared/types";
 import { User, Team, FileOperation } from "@server/models";
 import { allow } from "./cancan";
-import { and, isTeamAdmin, isTeamMutable, or } from "./utils";
+import { and, isTeamAdmin, isTeamManager, isTeamMutable, or } from "./utils";
 
 allow(
   User,
   ["createFileOperation", "createExport"],
   Team,
   // Note: Not checking for isTeamMutable here because we want to allow exporting data in read-only.
-  isTeamAdmin
+  isTeamManager
 );
 
-allow(User, "read", FileOperation, isTeamAdmin);
+allow(User, "read", FileOperation, isTeamManager);
 
 allow(User, "delete", FileOperation, (actor, fileOperation) =>
   and(

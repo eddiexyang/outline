@@ -32,7 +32,7 @@ export default class WelcomeEmail extends BaseEmail<Props, BeforeSend> {
   }
 
   protected async beforeSend(props: Props) {
-    if (props.role === UserRole.Guest) {
+    if (props.role === UserRole.Viewer) {
       return false;
     }
     return {};

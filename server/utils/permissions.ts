@@ -1,28 +1,29 @@
-import compact from "lodash/compact";
 import orderBy from "lodash/orderBy";
-import type { WhereOptions } from "sequelize";
-import { Op } from "sequelize";
 import { CollectionPermission, DocumentPermission } from "@shared/types";
 import type { User } from "@server/models";
 import {
   Document,
   Group,
-  GroupMembership,
-  UserMembership,
+  User as UserModel,
 } from "@server/models";
+import {
+  PermissionLevel,
+  PermissionSubjectType,
+} from "@server/models/Permission";
+import PermissionResolver from "@server/services/permissions/PermissionResolver";
 import { authorize } from "@server/policies";
 
 // Higher value takes precedence
 export const CollectionPermissionPriority = {
-  [CollectionPermission.Admin]: 2,
-  [CollectionPermission.ReadWrite]: 1,
+  [CollectionPermission.Manage]: 2,
+  [CollectionPermission.Edit]: 1,
   [CollectionPermission.Read]: 0,
 } satisfies Record<CollectionPermission, number>;
 
 // Higher value takes precedence
 export const DocumentPermissionPriority = {
-  [DocumentPermission.Admin]: 2,
-  [DocumentPermission.ReadWrite]: 1,
+  [DocumentPermission.Manage]: 2,
+  [DocumentPermission.Edit]: 1,
   [DocumentPermission.Read]: 0,
 } satisfies Record<DocumentPermission, number>;
 
@@ -100,71 +101,47 @@ export const getDocumentPermission = async ({
   documentId: string;
   skipMembershipId?: string;
 }): Promise<DocumentPermission | undefined> => {
-  const document = await Document.findByPk(documentId, { userId });
-  const permissions: DocumentPermission[] = [];
-
-  const collection = document?.collection;
-  if (collection) {
-    const collectionPermissions = orderBy(
-      compact([
-        collection.permission,
-        ...compact(
-          collection.memberships?.map(
-            (m) => m.permission as CollectionPermission
-          )
-        ),
-        ...compact(
-          collection.groupMemberships?.map(
-            (m) => m.permission as CollectionPermission
-          )
-        ),
-      ]),
-      (permission) => CollectionPermissionPriority[permission],
-      "desc"
-    );
-
-    if (collectionPermissions[0]) {
-      permissions.push(
-        collectionPermissions[0] === CollectionPermission.Read
-          ? DocumentPermission.Read
-          : DocumentPermission.ReadWrite
-      );
-    }
-  }
-
-  const userMembershipWhere: WhereOptions<UserMembership> = {
-    userId,
-    documentId,
-  };
-  const groupMembershipWhere: WhereOptions<GroupMembership> = {
-    documentId,
-  };
-
-  if (skipMembershipId) {
-    userMembershipWhere.id = { [Op.ne]: skipMembershipId };
-    groupMembershipWhere.id = { [Op.ne]: skipMembershipId };
-  }
-
-  const [userMemberships, groupMemberships] = await Promise.all([
-    UserMembership.findAll({
-      where: userMembershipWhere,
-    }),
-    GroupMembership.findAll({
-      where: groupMembershipWhere,
-      include: [
-        {
-          model: Group.filterByMember(userId),
-          as: "group",
-          required: true,
-        },
-      ],
+  const [document, user, groups] = await Promise.all([
+    Document.findByPk(documentId),
+    UserModel.findByPk(userId),
+    Group.filterByMember(userId).findAll({
+      attributes: ["id"],
     }),
   ]);
+  if (!document || !user) {
+    return undefined;
+  }
 
-  permissions.push(
-    ...userMemberships.map((m) => m.permission as DocumentPermission),
-    ...groupMemberships.map((m) => m.permission as DocumentPermission)
-  );
+  const groupIds = new Set(groups.map((group) => group.id));
+  const resolvedPermissions = await PermissionResolver.resolveForDocument({
+    teamId: user.teamId,
+    documentId: document.id,
+    collectionId: document.collectionId ?? null,
+  });
+
+  const permissions = resolvedPermissions
+    .filter((permission) => permission.id !== skipMembershipId)
+    .filter((permission) => {
+      if (permission.subjectType === PermissionSubjectType.User) {
+        return permission.subjectId === userId;
+      }
+      if (permission.subjectType === PermissionSubjectType.Role) {
+        return permission.subjectRole === user.role;
+      }
+      if (permission.subjectType === PermissionSubjectType.Group) {
+        return !!permission.subjectId && groupIds.has(permission.subjectId);
+      }
+      return false;
+    })
+    .map((permission) => {
+      if (permission.permission === PermissionLevel.Manage) {
+        return DocumentPermission.Manage;
+      }
+      if (permission.permission === PermissionLevel.Edit) {
+        return DocumentPermission.Edit;
+      }
+      return DocumentPermission.Read;
+    });
 
   const orderedPermissions = orderBy(
     permissions,

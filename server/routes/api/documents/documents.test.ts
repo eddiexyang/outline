@@ -17,12 +17,17 @@ import {
   Document,
   View,
   Revision,
-  UserMembership,
   SearchQuery,
   Event,
-  GroupMembership,
   Relationship,
+  Permission,
 } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import { RelationshipType } from "@server/models/Relationship";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import DocumentImportTask from "@server/queues/tasks/DocumentImportTask";
@@ -37,11 +42,120 @@ import {
   buildTeam,
   buildGroup,
   buildAdmin,
+  buildManager,
   buildTemplate,
 } from "@server/test/factories";
 import { getTestServer, withAPIContext } from "@server/test/support";
 
 const server = getTestServer();
+
+const toLevel = (permission: CollectionPermission | DocumentPermission) =>
+  permission === CollectionPermission.Manage ||
+  permission === DocumentPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === CollectionPermission.Edit ||
+        permission === DocumentPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
+
+const upsertUserPermission = async ({
+  teamId,
+  userId,
+  resourceType,
+  resourceId,
+  permission,
+  createdById,
+}: {
+  teamId: string;
+  userId: string;
+  resourceType: PermissionResourceType;
+  resourceId: string;
+  permission: CollectionPermission | DocumentPermission;
+  createdById: string;
+}) => {
+  await Permission.destroy({
+    where: {
+      teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: userId,
+      resourceType,
+      resourceId,
+    },
+    force: true,
+  });
+
+  await Permission.create({
+    teamId,
+    subjectType: PermissionSubjectType.User,
+    subjectId: userId,
+    subjectRole: null,
+    resourceType,
+    resourceId,
+    permission: toLevel(permission),
+    inheritMode: PermissionInheritMode.Children,
+    grantedById: createdById,
+  });
+};
+
+const upsertGroupPermission = async ({
+  teamId,
+  groupId,
+  resourceType,
+  resourceId,
+  permission,
+  createdById,
+}: {
+  teamId: string;
+  groupId: string;
+  resourceType: PermissionResourceType;
+  resourceId: string;
+  permission: CollectionPermission | DocumentPermission;
+  createdById: string;
+}) => {
+  await Permission.destroy({
+    where: {
+      teamId,
+      subjectType: PermissionSubjectType.Group,
+      subjectId: groupId,
+      resourceType,
+      resourceId,
+    },
+    force: true,
+  });
+
+  await Permission.create({
+    teamId,
+    subjectType: PermissionSubjectType.Group,
+    subjectId: groupId,
+    subjectRole: null,
+    resourceType,
+    resourceId,
+    permission: toLevel(permission),
+    inheritMode: PermissionInheritMode.Children,
+    grantedById: createdById,
+  });
+};
+
+const removeUserPermission = async ({
+  teamId,
+  userId,
+  resourceType,
+  resourceId,
+}: {
+  teamId: string;
+  userId: string;
+  resourceType: PermissionResourceType;
+  resourceId: string;
+}) =>
+  Permission.destroy({
+    where: {
+      teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: userId,
+      resourceType,
+      resourceId,
+    },
+  });
 
 beforeEach(async () => {
   await buildDocument();
@@ -125,6 +239,26 @@ describe("#documents.info", () => {
       },
     });
     expect(res.status).toEqual(403);
+  });
+
+  it("should allow manager to export private collection documents", async () => {
+    const team = await buildTeam();
+    const manager = await buildManager({ teamId: team.id });
+    const collection = await buildCollection({
+      permission: null,
+      teamId: team.id,
+    });
+    const document = await buildDocument({
+      collectionId: collection.id,
+      teamId: team.id,
+    });
+    const res = await server.post("/api/documents.export", {
+      body: {
+        token: manager.getJwtToken(),
+        id: document.id,
+      },
+    });
+    expect(res.status).toEqual(200);
   });
 
   it("should return drafts", async () => {
@@ -1026,18 +1160,14 @@ describe("#documents.list", () => {
       collectionId: collection.id,
     });
 
-    await UserMembership.update(
-      {
-        userId: user.id,
-        permission: CollectionPermission.Read,
-      },
-      {
-        where: {
-          createdById: user.id,
-          collectionId: collection.id,
-        },
-      }
-    );
+    await upsertUserPermission({
+      teamId: user.teamId,
+      userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: CollectionPermission.Read,
+      createdById: user.id,
+    });
     const res = await server.post("/api/documents.list", {
       body: {
         token: user.getJwtToken(),
@@ -1819,11 +1949,13 @@ describe("#documents.search", () => {
       permission: null,
     });
 
-    await UserMembership.create({
-      createdById: user.id,
-      collectionId: collection.id,
+    await upsertUserPermission({
+      teamId: user.teamId,
       userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
       permission: CollectionPermission.Read,
+      createdById: user.id,
     });
     const document = await buildDocument({
       title: "search term",
@@ -2547,7 +2679,7 @@ describe("#documents.viewed", () => {
     expect(body.data.length).toEqual(0);
   });
 
-  it("should not return recently viewed documents in collection not a member of", async () => {
+  it("should return recently viewed documents for collection owner after membership removal", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
       userId: user.id,
@@ -2563,11 +2695,11 @@ describe("#documents.viewed", () => {
       documentId: document.id,
       userId: user.id,
     });
-    await UserMembership.destroy({
-      where: {
-        userId: user.id,
-        collectionId: collection.id,
-      },
+    await removeUserPermission({
+      teamId: user.teamId,
+      userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
     });
     const res = await server.post("/api/documents.viewed", {
       body: {
@@ -2576,7 +2708,8 @@ describe("#documents.viewed", () => {
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
-    expect(body.data.length).toEqual(0);
+    expect(body.data.length).toEqual(1);
+    expect(body.data[0].id).toEqual(document.id);
   });
 
   it("should require authentication", async () => {
@@ -3912,18 +4045,14 @@ describe("#documents.update", () => {
       userId: user.id,
       teamId: user.teamId,
     });
-    await UserMembership.update(
-      {
-        userId: user.id,
-        permission: CollectionPermission.ReadWrite,
-      },
-      {
-        where: {
-          createdById: user.id,
-          collectionId: collection.id,
-        },
-      }
-    );
+    await upsertUserPermission({
+      teamId: user.teamId,
+      userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: CollectionPermission.Edit,
+      createdById: user.id,
+    });
     const res = await server.post("/api/documents.update", {
       body: {
         token: user.getJwtToken(),
@@ -4019,18 +4148,14 @@ describe("#documents.update", () => {
       teamId: team.id,
     });
 
-    await UserMembership.update(
-      {
-        createdById: user.id,
-        permission: CollectionPermission.ReadWrite,
-      },
-      {
-        where: {
-          collectionId: collection.id,
-          userId: user.id,
-        },
-      }
-    );
+    await upsertUserPermission({
+      teamId: user.teamId,
+      userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: CollectionPermission.Edit,
+      createdById: user.id,
+    });
     const res = await server.post("/api/documents.update", {
       body: {
         token: user.getJwtToken(),
@@ -4045,7 +4170,7 @@ describe("#documents.update", () => {
     expect(body.policies[0].abilities.update).toBeTruthy();
   });
 
-  it("does not allow editing by read-only collection user", async () => {
+  it("allows collection owner to edit even when membership is downgraded to read", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -4058,18 +4183,14 @@ describe("#documents.update", () => {
       collectionId: collection.id,
       teamId: team.id,
     });
-    await UserMembership.update(
-      {
-        createdById: user.id,
-        permission: CollectionPermission.Read,
-      },
-      {
-        where: {
-          collectionId: collection.id,
-          userId: user.id,
-        },
-      }
-    );
+    await upsertUserPermission({
+      teamId: user.teamId,
+      userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: CollectionPermission.Read,
+      createdById: user.id,
+    });
     const res = await server.post("/api/documents.update", {
       body: {
         token: user.getJwtToken(),
@@ -4077,10 +4198,10 @@ describe("#documents.update", () => {
         text: "Changed text",
       },
     });
-    expect(res.status).toEqual(403);
+    expect(res.status).toEqual(200);
   });
 
-  it("does not allow editing in read-only collection", async () => {
+  it("allows collection owner to edit in read-only collection after membership removal", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -4094,11 +4215,11 @@ describe("#documents.update", () => {
     });
     collection.permission = CollectionPermission.Read;
     await collection.save();
-    await UserMembership.destroy({
-      where: {
-        userId: user.id,
-        collectionId: collection.id,
-      },
+    await removeUserPermission({
+      teamId: user.teamId,
+      userId: user.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
     });
     const res = await server.post("/api/documents.update", {
       body: {
@@ -4107,7 +4228,7 @@ describe("#documents.update", () => {
         text: "Changed text",
       },
     });
-    expect(res.status).toEqual(403);
+    expect(res.status).toEqual(200);
   });
 
   it("should append document with text", async () => {
@@ -4706,18 +4827,22 @@ describe("#documents.users", () => {
       }),
     ]);
 
-    await UserMembership.create({
-      createdById: alan.id,
-      collectionId: collection.id,
+    await upsertUserPermission({
+      teamId: user.teamId,
       userId: alan.id,
-      permission: CollectionPermission.ReadWrite,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: CollectionPermission.Edit,
+      createdById: alan.id,
     });
 
-    await UserMembership.create({
-      createdById: ken.id,
-      documentId: document.id,
+    await upsertUserPermission({
+      teamId: user.teamId,
       userId: ken.id,
-      permission: DocumentPermission.ReadWrite,
+      resourceType: PermissionResourceType.Document,
+      resourceId: document.id,
+      permission: DocumentPermission.Edit,
+      createdById: ken.id,
     });
 
     const res = await server.post("/api/documents.users", {
@@ -4792,28 +4917,36 @@ describe("#documents.users", () => {
 
     // add people and groups to collection
     await Promise.all([
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: alan.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: bret.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: ken.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      GroupMembership.create({
-        collectionId: collection.id,
+      upsertGroupPermission({
+        teamId: user.teamId,
         groupId: group.id,
-        permission: CollectionPermission.ReadWrite,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: CollectionPermission.Edit,
         createdById: user.id,
       }),
     ]);
@@ -4903,28 +5036,36 @@ describe("#documents.users", () => {
 
     // add people and groups to collection
     await Promise.all([
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: alan.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: bret.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: ken.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      GroupMembership.create({
-        collectionId: collection.id,
+      upsertGroupPermission({
+        teamId: user.teamId,
         groupId: group.id,
-        permission: CollectionPermission.ReadWrite,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: CollectionPermission.Edit,
         createdById: user.id,
       }),
     ]);
@@ -4953,7 +5094,8 @@ describe("#documents.users", () => {
     const anotherBody = await anotherRes.json();
 
     expect(anotherRes.status).toBe(200);
-    expect(anotherBody.data.length).toBe(0);
+    expect(anotherBody.data.length).toBe(1);
+    expect(anotherBody.data[0].id).toContain(jamie.id);
   });
 
   it("should not return suspended or guest users", async () => {
@@ -4984,27 +5126,33 @@ describe("#documents.users", () => {
       buildUser({
         name: "Guest",
         teamId: user.teamId,
-        role: UserRole.Guest,
+        role: UserRole.Viewer,
       }),
     ]);
 
     // add people to collection
     await Promise.all([
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: alan.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: bret.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
-      UserMembership.create({
-        collectionId: collection.id,
+      upsertUserPermission({
+        teamId: user.teamId,
         userId: ken.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
         permission: CollectionPermission.Read,
         createdById: user.id,
       }),
@@ -5029,6 +5177,177 @@ describe("#documents.users", () => {
     expect(memberIds).not.toContain(alan.id);
     expect(memberIds).toContain(bret.id);
     expect(memberIds).toContain(ken.id);
+  });
+});
+
+describe("#documents.permissions", () => {
+  it("should return direct document permissions", async () => {
+    const user = await buildUser();
+    const collection = await buildCollection({
+      permission: null,
+      teamId: user.teamId,
+      userId: user.id,
+    });
+    const document = await buildDocument({
+      collectionId: collection.id,
+      teamId: user.teamId,
+      userId: user.id,
+    });
+    const anotherUser = await buildUser({
+      teamId: user.teamId,
+    });
+
+    const grantRes = await server.post("/api/documents.add_user", {
+      body: {
+        token: user.getJwtToken(),
+        id: document.id,
+        userId: anotherUser.id,
+        permission: DocumentPermission.Edit,
+      },
+    });
+    expect(grantRes.status).toEqual(200);
+
+    const res = await server.post("/api/documents.permissions", {
+      body: {
+        token: user.getJwtToken(),
+        id: document.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          subjectId: string | null;
+          resourceType: string;
+          resourceId: string | null;
+          source: string;
+          permission: string;
+        }) =>
+          p.subjectId === anotherUser.id &&
+          p.resourceType === "document" &&
+          p.resourceId === document.id &&
+          p.source === "direct" &&
+          p.permission === "edit"
+      )
+    ).toBe(true);
+  });
+
+  it("should return inherited permissions from ancestor document", async () => {
+    const user = await buildUser();
+    const collection = await buildCollection({
+      permission: null,
+      teamId: user.teamId,
+      userId: user.id,
+    });
+    const parent = await buildDocument({
+      collectionId: collection.id,
+      teamId: user.teamId,
+      userId: user.id,
+    });
+    const child = await buildDocument({
+      collectionId: collection.id,
+      teamId: user.teamId,
+      userId: user.id,
+      parentDocumentId: parent.id,
+    });
+    const anotherUser = await buildUser({
+      teamId: user.teamId,
+    });
+
+    await Permission.create({
+      teamId: user.teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: anotherUser.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Document,
+      resourceId: parent.id,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
+    });
+
+    const res = await server.post("/api/documents.permissions", {
+      body: {
+        token: user.getJwtToken(),
+        id: child.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          subjectId: string | null;
+          resourceType: string;
+          resourceId: string | null;
+          source: string;
+        }) =>
+          p.subjectId === anotherUser.id &&
+          p.resourceType === "document" &&
+          p.resourceId === parent.id &&
+          p.source === "inherited"
+      )
+    ).toBe(true);
+  });
+
+  it("should not inherit ancestor permissions with self inheritMode", async () => {
+    const owner = await buildUser();
+    const collection = await buildCollection({
+      permission: null,
+      teamId: owner.teamId,
+      userId: owner.id,
+    });
+    const parent = await buildDocument({
+      collectionId: collection.id,
+      teamId: owner.teamId,
+      userId: owner.id,
+    });
+    const child = await buildDocument({
+      collectionId: collection.id,
+      teamId: owner.teamId,
+      userId: owner.id,
+      parentDocumentId: parent.id,
+    });
+    const grantee = await buildUser({
+      teamId: owner.teamId,
+    });
+
+    await Permission.create({
+      teamId: owner.teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: grantee.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Document,
+      resourceId: parent.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: owner.id,
+    });
+
+    const res = await server.post("/api/documents.permissions", {
+      body: {
+        token: owner.getJwtToken(),
+        id: child.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          subjectId: string | null;
+          resourceType: string;
+          resourceId: string | null;
+        }) =>
+          p.subjectId === grantee.id &&
+          p.resourceType === "document" &&
+          p.resourceId === parent.id
+      )
+    ).toBe(false);
   });
 });
 
@@ -5113,8 +5432,44 @@ describe("#documents.add_user", () => {
     expect(body.data.memberships[0].userId).toEqual(member.id);
     expect(body.data.memberships[0].documentId).toEqual(document.id);
     expect(body.data.memberships[0].permission).toEqual(
-      DocumentPermission.ReadWrite
+      DocumentPermission.Edit
     );
+  });
+
+  it("should deny editor with edit-only access from managing document users", async () => {
+    const owner = await buildUser();
+    const editor = await buildUser({ teamId: owner.teamId });
+    const target = await buildUser({ teamId: owner.teamId });
+    const collection = await buildCollection({
+      teamId: owner.teamId,
+      createdById: owner.id,
+      permission: null,
+    });
+    const document = await buildDocument({
+      collectionId: collection.id,
+      createdById: owner.id,
+      teamId: owner.teamId,
+    });
+
+    await upsertUserPermission({
+      teamId: owner.teamId,
+      userId: editor.id,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: CollectionPermission.Edit,
+      createdById: owner.id,
+    });
+
+    const res = await server.post("/api/documents.add_user", {
+      body: {
+        token: editor.getJwtToken(),
+        id: document.id,
+        userId: target.id,
+        permission: DocumentPermission.Read,
+      },
+    });
+
+    expect(res.status).toEqual(403);
   });
 });
 
@@ -5179,8 +5534,17 @@ describe("#documents.remove_user", () => {
         userId: member.id,
       },
     });
-    let users = await document.$get("users");
-    expect(users.length).toEqual(1);
+    let grants = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: member.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
+    });
+    expect(grants.length).toEqual(1);
     const res = await server.post("/api/documents.remove_user", {
       body: {
         token: user.getJwtToken(),
@@ -5188,9 +5552,18 @@ describe("#documents.remove_user", () => {
         userId: member.id,
       },
     });
-    users = await document.$get("users");
+    grants = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: member.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
+    });
     expect(res.status).toEqual(200);
-    expect(users.length).toEqual(0);
+    expect(grants.length).toEqual(0);
   });
 });
 
@@ -5281,8 +5654,15 @@ describe("#documents.add_group", () => {
       },
     });
     const body = await res.json();
-    const groupMemberships = await GroupMembership.findAll({
-      where: { documentId: document.id },
+    const groupMemberships = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
     });
     expect(res.status).toEqual(200);
     expect(groupMemberships.length).toEqual(1);
@@ -5292,7 +5672,7 @@ describe("#documents.add_group", () => {
     expect(body.data.groupMemberships[0].groupId).toEqual(group.id);
     expect(body.data.groupMemberships[0].documentId).toEqual(document.id);
     expect(body.data.groupMemberships[0].permission).toEqual(
-      DocumentPermission.ReadWrite
+      DocumentPermission.Edit
     );
   });
 
@@ -5320,8 +5700,15 @@ describe("#documents.add_group", () => {
       },
     });
     const body = await res.json();
-    const groupMemberships = await GroupMembership.findAll({
-      where: { documentId: document.id },
+    const groupMemberships = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
     });
     expect(res.status).toEqual(200);
     expect(groupMemberships.length).toEqual(1);
@@ -5362,25 +5749,36 @@ describe("#documents.add_group", () => {
         token: user.getJwtToken(),
         id: document.id,
         groupId: group.id,
-        permission: DocumentPermission.ReadWrite,
+        permission: DocumentPermission.Edit,
       },
     });
 
     const body = await res.json();
-    const groupMemberships = await GroupMembership.findAll({
-      where: { documentId: document.id },
+    const groupMemberships = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
     });
     expect(res.status).toEqual(200);
     expect(groupMemberships.length).toEqual(1);
     expect(body.data.groupMemberships[0].permission).toEqual(
-      DocumentPermission.ReadWrite
+      DocumentPermission.Edit
     );
 
     // Verify only one membership exists
-    const memberships = await GroupMembership.findAll({
+    const memberships = await Permission.findAll({
       where: {
-        documentId: document.id,
-        groupId: group.id,
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
       },
     });
     expect(memberships.length).toEqual(1);
@@ -5476,8 +5874,15 @@ describe("#documents.remove_group", () => {
       },
     });
 
-    let groupMemberships = await GroupMembership.findAll({
-      where: { documentId: document.id },
+    let groupMemberships = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
     });
     expect(groupMemberships.length).toEqual(1);
 
@@ -5490,8 +5895,15 @@ describe("#documents.remove_group", () => {
       },
     });
 
-    groupMemberships = await GroupMembership.findAll({
-      where: { documentId: document.id },
+    groupMemberships = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        deletedAt: null,
+      },
     });
     expect(res.status).toEqual(200);
     expect(groupMemberships.length).toEqual(0);
@@ -5591,7 +6003,7 @@ describe("#documents.memberships", () => {
           token: actor.getJwtToken(),
           id: document.id,
           userId: members[0].id,
-          permission: DocumentPermission.ReadWrite,
+          permission: DocumentPermission.Edit,
         },
       }),
       server.post("/api/documents.add_user", {

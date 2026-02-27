@@ -53,6 +53,7 @@ export const UsersListSchema = z.object({
         "invited",
         "viewers",
         "admins",
+        "managers",
         "members",
         "active",
         "all",
@@ -161,7 +162,7 @@ export type UsersPromoteReq = z.infer<typeof UsersPromoteSchema>;
 
 export const UsersDemoteSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({
-    to: z.enum(UserRole).prefault(UserRole.Member),
+    to: z.enum(UserRole).prefault(UserRole.Editor),
   }),
 });
 

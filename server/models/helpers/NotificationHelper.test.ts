@@ -1,5 +1,11 @@
 import { DocumentPermission, NotificationEventType } from "@shared/types";
-import { UserMembership } from "@server/models";
+import { Permission } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildComment,
   buildDocument,
@@ -8,6 +14,13 @@ import {
   buildUser,
 } from "@server/test/factories";
 import NotificationHelper from "./NotificationHelper";
+
+const toDocumentLevel = (permission: DocumentPermission) =>
+  permission === DocumentPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === DocumentPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
 
 describe("NotificationHelper", () => {
   describe("getCommentNotificationRecipients", () => {
@@ -79,24 +92,41 @@ describe("NotificationHelper", () => {
         teamId: document.teamId,
         notificationSettings: { [NotificationEventType.CreateComment]: true },
       });
-      await UserMembership.create({
-        documentId: document.id,
-        userId: user.id,
-        permission: DocumentPermission.Read,
-        createdById: user.id,
-      });
-      await UserMembership.create({
-        documentId: document.id,
-        userId: user2.id,
-        permission: DocumentPermission.Read,
-        createdById: user.id,
-      });
-      await UserMembership.create({
-        documentId: document.id,
-        userId: user3.id,
-        permission: DocumentPermission.Read,
-        createdById: user.id,
-      });
+      await Permission.bulkCreate([
+        {
+          teamId: document.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: user.id,
+          subjectRole: null,
+          resourceType: PermissionResourceType.Document,
+          resourceId: document.id,
+          permission: toDocumentLevel(DocumentPermission.Read),
+          inheritMode: PermissionInheritMode.Self,
+          grantedById: user.id,
+        },
+        {
+          teamId: document.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: user2.id,
+          subjectRole: null,
+          resourceType: PermissionResourceType.Document,
+          resourceId: document.id,
+          permission: toDocumentLevel(DocumentPermission.Read),
+          inheritMode: PermissionInheritMode.Self,
+          grantedById: user.id,
+        },
+        {
+          teamId: document.teamId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: user3.id,
+          subjectRole: null,
+          resourceType: PermissionResourceType.Document,
+          resourceId: document.id,
+          permission: toDocumentLevel(DocumentPermission.Read),
+          inheritMode: PermissionInheritMode.Self,
+          grantedById: user.id,
+        },
+      ]);
 
       // Add a subscription for only one of those users
       await Promise.all([

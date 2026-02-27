@@ -95,7 +95,7 @@ router.post(
       .map((star) => star.documentId)
       .filter(Boolean) as string[];
     const documents = documentIds.length
-      ? await Document.withMembershipScope(user.id).findAll({
+      ? await Document.withPermissionScope(user.id).findAll({
           where: {
             id: documentIds,
             collectionId: collectionIds,

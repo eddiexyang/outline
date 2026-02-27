@@ -1,5 +1,6 @@
 import { FetchError } from "node-fetch";
 import { Op } from "sequelize";
+import { CollectionPermission, DocumentPermission } from "@shared/types";
 import { colorPalette } from "@shared/utils/collections";
 import WebhookDisabledEmail from "@server/emails/templates/WebhookDisabledEmail";
 import env from "@server/env";
@@ -16,15 +17,19 @@ import {
   WebhookDelivery,
   WebhookSubscription,
   Document,
+  Permission,
   User,
   Revision,
   View,
   Share,
-  UserMembership,
-  GroupMembership,
   GroupUser,
   Comment,
 } from "@server/models";
+import {
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   presentAttachment,
   presentCollection,
@@ -39,9 +44,7 @@ import {
   presentUser,
   presentView,
   presentShare,
-  presentMembership,
   presentGroupUser,
-  presentGroupMembership,
   presentComment,
 } from "@server/presenters";
 import { BaseTask } from "@server/queues/tasks/base/BaseTask";
@@ -504,19 +507,22 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
     subscription: WebhookSubscription,
     event: CollectionUserEvent
   ): Promise<void> {
-    const model = await UserMembership.scope([
-      "withUser",
-      "withCollection",
-    ]).findOne({
+    const model = await Permission.findOne({
       where: {
-        collectionId: event.collectionId,
-        userId: event.userId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: event.userId,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: event.collectionId,
       },
       paranoid: false,
     });
+    const [user, collectionModel] = await Promise.all([
+      User.findByPk(event.userId, { paranoid: false }),
+      Collection.findByPk(event.collectionId, { paranoid: false }),
+    ]);
 
     const collection =
-      model && (await presentCollection(undefined, model.collection!));
+      collectionModel && (await presentCollection(undefined, collectionModel));
     if (collection) {
       // For backward compatibility, set a default color.
       collection.color = collection.color ?? colorPalette[0];
@@ -527,9 +533,9 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
       subscription,
       payload: {
         id: event.modelId,
-        model: model && presentMembership(model),
+        model: model && this.presentCollectionUserPermission(model),
         collection,
-        user: model && presentUser(model.user),
+        user: user && presentUser(user),
       },
     });
   }
@@ -538,19 +544,22 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
     subscription: WebhookSubscription,
     event: CollectionGroupEvent
   ): Promise<void> {
-    const model = await GroupMembership.scope([
-      "withGroup",
-      "withCollection",
-    ]).findOne({
+    const model = await Permission.findOne({
       where: {
-        collectionId: event.collectionId,
-        groupId: event.modelId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: event.modelId,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: event.collectionId,
       },
       paranoid: false,
     });
+    const [group, collectionModel] = await Promise.all([
+      Group.findByPk(event.modelId, { paranoid: false }),
+      Collection.findByPk(event.collectionId, { paranoid: false }),
+    ]);
 
     const collection =
-      model && (await presentCollection(undefined, model.collection!));
+      collectionModel && (await presentCollection(undefined, collectionModel));
     if (collection) {
       // For backward compatibility, set a default color.
       collection.color = collection.color ?? colorPalette[0];
@@ -561,9 +570,9 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
       subscription,
       payload: {
         id: event.modelId,
-        model: model && presentGroupMembership(model),
+        model: model && this.presentCollectionGroupPermission(model),
         collection,
-        group: model && (await presentGroup(model.group)),
+        group: group && (await presentGroup(group)),
       },
     });
   }
@@ -613,30 +622,33 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
     subscription: WebhookSubscription,
     event: DocumentUserEvent
   ): Promise<void> {
-    const model = await UserMembership.scope([
-      "withUser",
-      "withDocument",
-    ]).findOne({
+    const model = await Permission.findOne({
       where: {
-        documentId: event.documentId,
-        userId: event.userId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: event.userId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: event.documentId,
       },
       paranoid: false,
     });
+    const [user, documentModel] = await Promise.all([
+      User.findByPk(event.userId, { paranoid: false }),
+      Document.findByPk(event.documentId, { paranoid: false }),
+    ]);
 
     await this.sendWebhook({
       event,
       subscription,
       payload: {
         id: event.modelId,
-        model: model && presentMembership(model),
+        model: model && this.presentDocumentUserPermission(model),
         document:
-          model &&
-          (await presentDocument(undefined, model.document!, {
+          documentModel &&
+          (await presentDocument(undefined, documentModel, {
             includeData: true,
             includeText: true,
           })),
-        user: model && presentUser(model.user),
+        user: user && presentUser(user),
       },
     });
   }
@@ -645,28 +657,31 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
     subscription: WebhookSubscription,
     event: DocumentGroupEvent
   ): Promise<void> {
-    const model = await GroupMembership.scope([
-      "withGroup",
-      "withDocument",
-    ]).findOne({
+    const model = await Permission.findOne({
       where: {
-        documentId: event.documentId,
-        groupId: event.modelId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: event.modelId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: event.documentId,
       },
       paranoid: false,
     });
+    const [group, documentModel] = await Promise.all([
+      Group.findByPk(event.modelId, { paranoid: false }),
+      Document.findByPk(event.documentId, { paranoid: false }),
+    ]);
 
     const document =
-      model && (await presentDocument(undefined, model.document!));
+      documentModel && (await presentDocument(undefined, documentModel));
 
     await this.sendWebhook({
       event,
       subscription,
       payload: {
         id: event.modelId,
-        model: model && presentGroupMembership(model),
+        model: model && this.presentDocumentGroupPermission(model),
         document,
-        group: model && (await presentGroup(model.group)),
+        group: group && (await presentGroup(group)),
       },
     });
   }
@@ -715,6 +730,74 @@ export default class DeliverWebhookTask extends BaseTask<Props> {
         model: model && presentUser(model),
       },
     });
+  }
+
+  private levelToCollectionPermission(level: PermissionLevel) {
+    if (level === PermissionLevel.Manage) {
+      return CollectionPermission.Manage;
+    }
+    if (level === PermissionLevel.Edit) {
+      return CollectionPermission.Edit;
+    }
+    return CollectionPermission.Read;
+  }
+
+  private levelToDocumentPermission(level: PermissionLevel) {
+    if (level === PermissionLevel.Manage) {
+      return DocumentPermission.Manage;
+    }
+    if (level === PermissionLevel.Edit) {
+      return DocumentPermission.Edit;
+    }
+    return DocumentPermission.Read;
+  }
+
+  private presentCollectionUserPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      userId: permission.subjectId!,
+      documentId: null,
+      collectionId: permission.resourceId!,
+      permission: this.levelToCollectionPermission(permission.permission),
+      createdById: permission.grantedById,
+      sourceId: null,
+      index: null,
+    };
+  }
+
+  private presentCollectionGroupPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      groupId: permission.subjectId!,
+      documentId: null,
+      collectionId: permission.resourceId!,
+      permission: this.levelToCollectionPermission(permission.permission),
+      sourceId: null,
+    };
+  }
+
+  private presentDocumentUserPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      userId: permission.subjectId!,
+      documentId: permission.resourceId!,
+      collectionId: null,
+      permission: this.levelToDocumentPermission(permission.permission),
+      createdById: permission.grantedById,
+      sourceId: null,
+      index: null,
+    };
+  }
+
+  private presentDocumentGroupPermission(permission: Permission) {
+    return {
+      id: permission.id,
+      groupId: permission.subjectId!,
+      documentId: permission.resourceId!,
+      collectionId: null,
+      permission: this.levelToDocumentPermission(permission.permission),
+      sourceId: null,
+    };
   }
 
   private async sendWebhook({

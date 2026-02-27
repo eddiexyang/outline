@@ -39,7 +39,7 @@ function Security() {
         {
           type: "item",
           label: t("Editor"),
-          value: "member",
+          value: "editor",
         },
         {
           type: "item",

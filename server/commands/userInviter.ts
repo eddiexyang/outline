@@ -80,9 +80,11 @@ export default async function userInviter(
         role:
           user.isAdmin && invite.role === UserRole.Admin
             ? UserRole.Admin
+            : user.isAdmin && invite.role === UserRole.Manager
+              ? UserRole.Manager
             : user.isViewer || invite.role === UserRole.Viewer
               ? UserRole.Viewer
-              : UserRole.Member,
+              : UserRole.Editor,
         invitedById: user.id,
         flags: {
           [UserFlag.InviteSent]: 1,

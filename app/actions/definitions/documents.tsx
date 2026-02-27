@@ -608,7 +608,7 @@ export const shareDocument = createAction({
   icon: <PadlockIcon />,
   visible: ({ stores, activeDocumentId }) => {
     const can = stores.policies.abilities(activeDocumentId!);
-    return can.manageUsers || can.share;
+    return can.share;
   },
   perform: async ({ activeDocumentId, stores, currentUserId, t }) => {
     if (!activeDocumentId || !currentUserId) {

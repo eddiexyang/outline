@@ -112,7 +112,7 @@ router.post(
       Template.scope([
         "defaultScope",
         {
-          method: ["withMembership", user.id],
+          method: ["withPermissionGrants", user.id],
         },
       ]).findAll({
         where,

@@ -8,10 +8,6 @@ export { default as Relationship } from "./Relationship";
 
 export { default as Collection } from "./Collection";
 
-export { default as GroupMembership } from "./GroupMembership";
-
-export { default as UserMembership } from "./UserMembership";
-
 export { default as Comment } from "./Comment";
 
 export { default as Document } from "./Document";
@@ -41,6 +37,8 @@ export { default as OAuthAuthorizationCode } from "./oauth/OAuthAuthorizationCod
 export { default as OAuthClient } from "./oauth/OAuthClient";
 
 export { default as Pin } from "./Pin";
+
+export { default as Permission } from "./Permission";
 
 export { default as Reaction } from "./Reaction";
 

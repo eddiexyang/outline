@@ -1,5 +1,4 @@
 import { EmptyResultError } from "sequelize";
-import { CollectionPermission } from "@shared/types";
 import slugify from "@shared/utils/slugify";
 import { parser } from "@server/editor";
 import Document from "@server/models/Document";
@@ -11,7 +10,12 @@ import {
   buildUser,
   buildGuestUser,
 } from "@server/test/factories";
-import UserMembership from "./UserMembership";
+import Permission, {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "./Permission";
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -247,7 +251,7 @@ describe("findByIds", () => {
     expect(documents.length).toBe(2);
   });
 
-  test("should return documents filtered to private collection access", async () => {
+  test("should include documents in private collections when listing by ids", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -258,6 +262,17 @@ describe("findByIds", () => {
       teamId: team.id,
       collectionId: collection.id,
     });
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: user.id,
+    });
     const document2 = await buildDocument({ teamId: team.id });
     const document3 = await buildDocument();
     const documents = await Document.findByIds(
@@ -266,7 +281,7 @@ describe("findByIds", () => {
         userId: user.id,
       }
     );
-    expect(documents.length).toBe(1);
+    expect(documents.length).toBe(2);
   });
 
   test("should return documents filtered to guest access", async () => {
@@ -274,11 +289,16 @@ describe("findByIds", () => {
     const user = await buildGuestUser({ teamId: team.id });
     const document1 = await buildDocument({ teamId: team.id });
     const collection = await buildCollection({ teamId: team.id });
-    await UserMembership.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: CollectionPermission.Read,
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: user.id,
     });
     const document2 = await buildDocument({
       teamId: team.id,
@@ -291,7 +311,7 @@ describe("findByIds", () => {
         userId: user.id,
       }
     );
-    expect(documents.length).toBe(1);
+    expect(documents.length).toBe(2);
   });
 });
 

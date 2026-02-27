@@ -38,7 +38,7 @@ router.post(
         return {
           email: `${rando}@example.com`,
           name: `${rando.slice(0, 5)} Tester`,
-          role: "member",
+          role: "editor",
         } as Invite;
       });
 

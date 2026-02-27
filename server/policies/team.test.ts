@@ -56,9 +56,9 @@ describe("policies/team", () => {
   describe("read template", () => {
     const permissions = new Map<UserRole, boolean>([
       [UserRole.Admin, true],
-      [UserRole.Member, true],
+      [UserRole.Editor, true],
       [UserRole.Viewer, true],
-      [UserRole.Guest, true],
+      [UserRole.Viewer, true],
     ]);
     for (const [role, permission] of permissions.entries()) {
       it(`check permission for ${role}`, async () => {
@@ -77,9 +77,9 @@ describe("policies/team", () => {
   describe("create template", () => {
     const permissions = new Map<UserRole, boolean>([
       [UserRole.Admin, true],
-      [UserRole.Member, true],
+      [UserRole.Editor, true],
       [UserRole.Viewer, false],
-      [UserRole.Guest, false],
+      [UserRole.Viewer, false],
     ]);
     for (const [role, permission] of permissions.entries()) {
       it(`check permission for ${role}`, async () => {
@@ -95,12 +95,53 @@ describe("policies/team", () => {
     }
   });
 
+  describe("create collection", () => {
+    it("denies editor when memberCollectionCreate is disabled", async () => {
+      const team = await buildTeam({
+        memberCollectionCreate: false,
+      });
+      const user = await buildUser({
+        teamId: team.id,
+        role: UserRole.Editor,
+      });
+
+      const abilities = serialize(user, team);
+      expect(abilities.createCollection).toEqual(false);
+    });
+
+    it("denies manager when memberCollectionCreate is disabled", async () => {
+      const team = await buildTeam({
+        memberCollectionCreate: false,
+      });
+      const user = await buildUser({
+        teamId: team.id,
+        role: UserRole.Manager,
+      });
+
+      const abilities = serialize(user, team);
+      expect(abilities.createCollection).toEqual(false);
+    });
+
+    it("allows admin when memberCollectionCreate is disabled", async () => {
+      const team = await buildTeam({
+        memberCollectionCreate: false,
+      });
+      const user = await buildUser({
+        teamId: team.id,
+        role: UserRole.Admin,
+      });
+
+      const abilities = serialize(user, team);
+      expect(abilities.createCollection).toEqual(true);
+    });
+  });
+
   describe("update template", () => {
     const permissions = new Map<UserRole, boolean>([
       [UserRole.Admin, true],
-      [UserRole.Member, false],
+      [UserRole.Editor, false],
       [UserRole.Viewer, false],
-      [UserRole.Guest, false],
+      [UserRole.Viewer, false],
     ]);
     for (const [role, permission] of permissions.entries()) {
       it(`check permission for ${role}`, async () => {

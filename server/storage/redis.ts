@@ -82,9 +82,29 @@ export default class RedisAdapter extends Redis {
     });
   }
 
-  private static client: RedisAdapter;
-  private static subscriber: RedisAdapter;
-  private static collabClient: RedisAdapter;
+  private static client?: RedisAdapter;
+  private static subscriber?: RedisAdapter;
+  private static collabClient?: RedisAdapter;
+
+  public static async disconnectAll(): Promise<void> {
+    const clients = [this.client, this.subscriber, this.collabClient].filter(
+      Boolean
+    ) as RedisAdapter[];
+
+    await Promise.allSettled(
+      clients.map(async (client) => {
+        try {
+          await client.quit();
+        } catch {
+          client.disconnect();
+        }
+      })
+    );
+
+    this.client = undefined;
+    this.subscriber = undefined;
+    this.collabClient = undefined;
+  }
 
   public static get defaultClient(): RedisAdapter {
     return (

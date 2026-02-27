@@ -10,7 +10,7 @@ exports[`presents a user 1`] = `
   "isSuspended": false,
   "lastActiveAt": undefined,
   "name": "Test User",
-  "role": "member",
+  "role": "editor",
   "timezone": undefined,
   "updatedAt": undefined,
 }
@@ -26,7 +26,7 @@ exports[`presents a user without slack data 1`] = `
   "isSuspended": false,
   "lastActiveAt": undefined,
   "name": "Test User",
-  "role": "member",
+  "role": "editor",
   "timezone": undefined,
   "updatedAt": undefined,
 }

@@ -5,6 +5,12 @@ import {
   StatusFilter,
 } from "@shared/types";
 import SearchHelper from "@server/models/helpers/SearchHelper";
+import Permission, {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildDocument,
   buildDraftDocument,
@@ -14,13 +20,18 @@ import {
   buildShare,
   buildGroup,
 } from "@server/test/factories";
-import UserMembership from "../UserMembership";
-import GroupMembership from "../GroupMembership";
 
 beforeEach(async () => {
   jest.resetAllMocks();
   await buildDocument();
 });
+
+const toDocumentLevel = (permission: DocumentPermission) =>
+  permission === DocumentPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === DocumentPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
 
 describe("SearchHelper", () => {
   describe("#searchForTeam", () => {
@@ -399,11 +410,16 @@ describe("SearchHelper", () => {
         createdById: user.id,
         title: "test",
       });
-      await UserMembership.create({
-        createdById: user.id,
-        documentId: draft.id,
-        userId: user.id,
-        permission: DocumentPermission.Read,
+      await Permission.create({
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: draft.id,
+        permission: toDocumentLevel(DocumentPermission.Read),
+        inheritMode: PermissionInheritMode.Self,
+        grantedById: user.id,
       });
 
       const { results } = await SearchHelper.searchForUser(user, {
@@ -709,10 +725,16 @@ describe("SearchHelper", () => {
       });
 
       // Add group membership to the document
-      await GroupMembership.create({
-        createdById: otherUser.id,
-        groupId: group.id,
-        documentId: document.id,
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Self,
+        grantedById: otherUser.id,
       });
 
       const { results } = await SearchHelper.searchForUser(user, {
@@ -1009,10 +1031,16 @@ describe("SearchHelper", () => {
       });
 
       // Add group membership to the document
-      await GroupMembership.create({
-        createdById: otherUser.id,
-        groupId: group.id,
-        documentId: document.id,
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: document.id,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Self,
+        grantedById: otherUser.id,
       });
 
       const documents = await SearchHelper.searchTitlesForUser(user, {

@@ -86,7 +86,7 @@ export const CollectionsAddGroupSchema = BaseSchema.extend({
     groupId: z.uuid(),
     permission: z
       .enum(CollectionPermission)
-      .prefault(CollectionPermission.ReadWrite),
+      .prefault(CollectionPermission.Edit),
   }),
 });
 
@@ -130,6 +130,24 @@ export const CollectionsMembershipsSchema = BaseSchema.extend({
 
 export type CollectionsMembershipsReq = z.infer<
   typeof CollectionsMembershipsSchema
+>;
+
+export const CollectionsPermissionsSchema = BaseSchema.extend({
+  body: BaseIdSchema,
+});
+
+export type CollectionsPermissionsReq = z.infer<
+  typeof CollectionsPermissionsSchema
+>;
+
+export const CollectionsPermissionsAllSchema = BaseSchema.extend({
+  body: z.object({
+    query: z.string().optional(),
+  }),
+});
+
+export type CollectionsPermissionsAllReq = z.infer<
+  typeof CollectionsPermissionsAllSchema
 >;
 
 export const CollectionsExportSchema = BaseSchema.extend({

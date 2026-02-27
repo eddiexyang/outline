@@ -163,6 +163,14 @@ export const DocumentsExportSchema = BaseSchema.extend({
 
 export type DocumentsExportReq = z.infer<typeof DocumentsExportSchema>;
 
+export const DocumentsPermissionsSchema = BaseSchema.extend({
+  body: BaseIdSchema,
+});
+
+export type DocumentsPermissionsReq = z.infer<
+  typeof DocumentsPermissionsSchema
+>;
+
 export const DocumentsRestoreSchema = BaseSchema.extend({
   body: BaseIdSchema.extend({
     /** Id of the collection to which the document belongs */
@@ -480,7 +488,7 @@ export const DocumentsAddGroupSchema = BaseSchema.extend({
     groupId: z.uuid(),
     permission: z
       .enum(DocumentPermission)
-      .prefault(DocumentPermission.ReadWrite),
+      .prefault(DocumentPermission.Edit),
   }),
 });
 

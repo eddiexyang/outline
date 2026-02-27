@@ -1,16 +1,125 @@
 import { CollectionPermission, CollectionStatusFilter } from "@shared/types";
-import { Document, UserMembership, GroupMembership } from "@server/models";
+import {
+  Document,
+  Permission,
+} from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildUser,
   buildAdmin,
+  buildManager,
   buildGroup,
   buildCollection,
   buildDocument,
   buildTeam,
+  buildShare,
 } from "@server/test/factories";
 import { getTestServer } from "@server/test/support";
 
 const server = getTestServer();
+
+const toCollectionLevel = (permission: CollectionPermission) =>
+  permission === CollectionPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === CollectionPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
+
+const upsertCollectionUserPermission = async ({
+  teamId,
+  userId,
+  collectionId,
+  permission,
+  createdById,
+}: {
+  teamId: string;
+  userId: string;
+  collectionId: string;
+  permission: CollectionPermission;
+  createdById: string;
+}) => {
+  await Permission.destroy({
+    where: {
+      teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: userId,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collectionId,
+    },
+    force: true,
+  });
+  await Permission.create({
+    teamId,
+    subjectType: PermissionSubjectType.User,
+    subjectId: userId,
+    subjectRole: null,
+    resourceType: PermissionResourceType.Collection,
+    resourceId: collectionId,
+    permission: toCollectionLevel(permission),
+    inheritMode: PermissionInheritMode.Children,
+    grantedById: createdById,
+  });
+};
+
+const upsertCollectionGroupPermission = async ({
+  teamId,
+  groupId,
+  collectionId,
+  permission,
+  createdById,
+}: {
+  teamId: string;
+  groupId: string;
+  collectionId: string;
+  permission: CollectionPermission;
+  createdById: string;
+}) => {
+  await Permission.destroy({
+    where: {
+      teamId,
+      subjectType: PermissionSubjectType.Group,
+      subjectId: groupId,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collectionId,
+    },
+    force: true,
+  });
+  await Permission.create({
+    teamId,
+    subjectType: PermissionSubjectType.Group,
+    subjectId: groupId,
+    subjectRole: null,
+    resourceType: PermissionResourceType.Collection,
+    resourceId: collectionId,
+    permission: toCollectionLevel(permission),
+    inheritMode: PermissionInheritMode.Children,
+    grantedById: createdById,
+  });
+};
+
+const removeCollectionUserPermission = async ({
+  teamId,
+  userId,
+  collectionId,
+}: {
+  teamId: string;
+  userId: string;
+  collectionId: string;
+}) =>
+  Permission.destroy({
+    where: {
+      teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: userId,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collectionId,
+    },
+  });
 
 describe("#collections.list", () => {
   it("should require authentication", async () => {
@@ -78,7 +187,7 @@ describe("#collections.list", () => {
     expect(body.data).toHaveLength(0);
   });
 
-  it("should not return private collections actor is not a member of", async () => {
+  it("should return all collections in list even if actor is not a member", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -96,8 +205,8 @@ describe("#collections.list", () => {
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
-    expect(body.data.length).toEqual(1);
-    expect(body.data[0].id).toEqual(collection.id);
+    expect(body.data.length).toEqual(2);
+    expect(body.data.map((c: { id: string }) => c.id)).toContain(collection.id);
   });
 
   it("should return private collections actor is a member of", async () => {
@@ -143,11 +252,16 @@ describe("#collections.list", () => {
         createdById: user.id,
       },
     });
-    await collection.$add("group", group, {
-      through: {
-        permission: CollectionPermission.Read,
-        createdById: user.id,
-      },
+    await Permission.create({
+      teamId: user.teamId,
+      subjectType: PermissionSubjectType.Group,
+      subjectId: group.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
     const res = await server.post("/api/collections.list", {
       body: {
@@ -435,11 +549,12 @@ describe("#collections.export", () => {
     const collection = await buildCollection({ teamId: team.id });
     collection.permission = null;
     await collection.save();
-    await UserMembership.create({
-      createdById: admin.id,
+    await upsertCollectionUserPermission({
+      teamId: team.id,
       collectionId: collection.id,
       userId: admin.id,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
+      createdById: admin.id,
     });
     const res = await server.post("/api/collections.export", {
       body: {
@@ -464,11 +579,16 @@ describe("#collections.export", () => {
         createdById: admin.id,
       },
     });
-    await collection.$add("group", group, {
-      through: {
-        permission: CollectionPermission.ReadWrite,
-        createdById: admin.id,
-      },
+    await Permission.create({
+      teamId: admin.teamId,
+      subjectType: PermissionSubjectType.Group,
+      subjectId: group.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: admin.id,
     });
     const res = await server.post("/api/collections.export", {
       body: {
@@ -539,10 +659,10 @@ describe("#collections.export_all", () => {
   });
 
   it("should return success", async () => {
-    const admin = await buildAdmin();
+    const manager = await buildManager();
     const res = await server.post("/api/collections.export_all", {
       body: {
-        token: admin.getJwtToken(),
+        token: manager.getJwtToken(),
       },
     });
     expect(res.status).toEqual(200);
@@ -560,11 +680,12 @@ describe("#collections.add_user", () => {
     const anotherUser = await buildUser({
       teamId: user.teamId,
     });
-    await UserMembership.create({
-      createdById: user.id,
+    await upsertCollectionUserPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       userId: user.id,
-      permission: CollectionPermission.Admin,
+      permission: CollectionPermission.Manage,
+      createdById: user.id,
     });
     const res = await server.post("/api/collections.add_user", {
       body: {
@@ -573,9 +694,18 @@ describe("#collections.add_user", () => {
         userId: anotherUser.id,
       },
     });
-    const users = await collection.$get("users");
+    const grants = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: anotherUser.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+    });
     expect(res.status).toEqual(200);
-    expect(users.length).toEqual(3);
+    expect(grants.length).toEqual(1);
   });
 
   it("should add user to collection", async () => {
@@ -595,9 +725,18 @@ describe("#collections.add_user", () => {
         userId: anotherUser.id,
       },
     });
-    const users = await collection.$get("users");
+    const grants = await Permission.findAll({
+      where: {
+        teamId: admin.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: anotherUser.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+    });
     expect(res.status).toEqual(200);
-    expect(users.length).toEqual(2);
+    expect(grants.length).toEqual(1);
   });
 
   it("should not allow add self", async () => {
@@ -677,7 +816,16 @@ describe("#collections.add_group", () => {
         groupId: group.id,
       },
     });
-    const groups = await collection.$get("groups");
+    const groups = await Permission.findAll({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+    });
     expect(groups.length).toEqual(1);
     expect(res.status).toEqual(200);
   });
@@ -767,8 +915,17 @@ describe("#collections.remove_group", () => {
         groupId: group.id,
       },
     });
-    let groups = await collection.$get("groups");
-    expect(groups.length).toEqual(1);
+    let permissionCount = await Permission.count({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+    });
+    expect(permissionCount).toEqual(1);
     const res = await server.post("/api/collections.remove_group", {
       body: {
         token: user.getJwtToken(),
@@ -776,9 +933,18 @@ describe("#collections.remove_group", () => {
         groupId: group.id,
       },
     });
-    groups = await collection.$get("groups");
+    permissionCount = await Permission.count({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+    });
     expect(res.status).toEqual(200);
-    expect(groups.length).toEqual(0);
+    expect(permissionCount).toEqual(0);
   });
 
   it("should require group in team", async () => {
@@ -847,9 +1013,18 @@ describe("#collections.remove_user", () => {
         userId: anotherUser.id,
       },
     });
-    const users = await collection.$get("users");
+    const grants = await Permission.findAll({
+      where: {
+        teamId: admin.teamId,
+        subjectType: PermissionSubjectType.User,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+    });
     expect(res.status).toEqual(200);
-    expect(users.length).toEqual(1);
+    expect(grants).toHaveLength(1);
+    expect(grants[0]?.subjectId).toEqual(admin.id);
   });
 
   it("should fail with status 400 bad request if user is not a member", async () => {
@@ -925,17 +1100,19 @@ describe("#collections.group_memberships", () => {
       permission: null,
       teamId: user.teamId,
     });
-    await UserMembership.create({
-      createdById: user.id,
+    await upsertCollectionUserPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       userId: user.id,
-      permission: CollectionPermission.ReadWrite,
-    });
-    await GroupMembership.create({
+      permission: CollectionPermission.Edit,
       createdById: user.id,
+    });
+    await upsertCollectionGroupPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       groupId: group.id,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
+      createdById: user.id,
     });
     const res = await server.post("/api/collections.group_memberships", {
       body: {
@@ -943,7 +1120,17 @@ describe("#collections.group_memberships", () => {
         id: collection.id,
       },
     });
-    const [membership] = await collection.$get("groupMemberships");
+    const membership = await Permission.findOne({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: group.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        deletedAt: null,
+      },
+      rejectOnEmpty: true,
+    });
     const body = await res.json();
     expect(res.status).toEqual(200);
     expect(body.data.groups.length).toEqual(1);
@@ -951,7 +1138,7 @@ describe("#collections.group_memberships", () => {
     expect(body.data.groupMemberships.length).toEqual(1);
     expect(body.data.groupMemberships[0].id).toEqual(membership.id);
     expect(body.data.groupMemberships[0].permission).toEqual(
-      CollectionPermission.ReadWrite
+      CollectionPermission.Edit
     );
   });
 
@@ -969,23 +1156,26 @@ describe("#collections.group_memberships", () => {
       permission: null,
       teamId: user.teamId,
     });
-    await UserMembership.create({
-      createdById: user.id,
+    await upsertCollectionUserPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       userId: user.id,
-      permission: CollectionPermission.ReadWrite,
-    });
-    await GroupMembership.create({
+      permission: CollectionPermission.Edit,
       createdById: user.id,
+    });
+    await upsertCollectionGroupPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       groupId: group.id,
-      permission: CollectionPermission.ReadWrite,
-    });
-    await GroupMembership.create({
+      permission: CollectionPermission.Edit,
       createdById: user.id,
+    });
+    await upsertCollectionGroupPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       groupId: group2.id,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
+      createdById: user.id,
     });
     const res = await server.post("/api/collections.group_memberships", {
       body: {
@@ -1012,23 +1202,26 @@ describe("#collections.group_memberships", () => {
       permission: null,
       teamId: user.teamId,
     });
-    await UserMembership.create({
-      createdById: user.id,
+    await upsertCollectionUserPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       userId: user.id,
-      permission: CollectionPermission.ReadWrite,
-    });
-    await GroupMembership.create({
+      permission: CollectionPermission.Edit,
       createdById: user.id,
+    });
+    await upsertCollectionGroupPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       groupId: group.id,
-      permission: CollectionPermission.ReadWrite,
-    });
-    await GroupMembership.create({
+      permission: CollectionPermission.Edit,
       createdById: user.id,
+    });
+    await upsertCollectionGroupPermission({
+      teamId: user.teamId,
       collectionId: collection.id,
       groupId: group2.id,
       permission: CollectionPermission.Read,
+      createdById: user.id,
     });
     const res = await server.post("/api/collections.group_memberships", {
       body: {
@@ -1066,6 +1259,305 @@ describe("#collections.group_memberships", () => {
   });
 });
 
+describe("#collections.permissions", () => {
+  it("should return collection permissions for explicit grants", async () => {
+    const admin = await buildAdmin();
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: null,
+    });
+    const anotherUser = await buildUser({
+      teamId: admin.teamId,
+    });
+
+    await server.post("/api/collections.add_user", {
+      body: {
+        token: admin.getJwtToken(),
+        id: collection.id,
+        userId: anotherUser.id,
+        permission: CollectionPermission.Edit,
+      },
+    });
+
+    const res = await server.post("/api/collections.permissions", {
+      body: {
+        token: admin.getJwtToken(),
+        id: collection.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          subjectId: string | null;
+          resourceType: string;
+          resourceId: string | null;
+          permission: string;
+        }) =>
+          p.subjectId === anotherUser.id &&
+          p.resourceType === "collection" &&
+          p.resourceId === collection.id &&
+          p.permission === "edit"
+      )
+    ).toBe(true);
+  });
+
+  it("should require read permission on collection", async () => {
+    const owner = await buildUser();
+    const outsider = await buildUser({
+      teamId: owner.teamId,
+    });
+    const collection = await buildCollection({
+      teamId: owner.teamId,
+      userId: owner.id,
+      permission: null,
+    });
+
+    const res = await server.post("/api/collections.permissions", {
+      body: {
+        token: outsider.getJwtToken(),
+        id: collection.id,
+      },
+    });
+
+    expect(res.status).toEqual(403);
+  });
+
+  it("should include inherited workspace permissions with children mode", async () => {
+    const admin = await buildAdmin();
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: null,
+    });
+
+    await Permission.create({
+      teamId: admin.teamId,
+      subjectType: PermissionSubjectType.Role,
+      subjectId: null,
+      subjectRole: "editor",
+      resourceType: PermissionResourceType.Workspace,
+      resourceId: null,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: admin.id,
+    });
+
+    const res = await server.post("/api/collections.permissions", {
+      body: {
+        token: admin.getJwtToken(),
+        id: collection.id,
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          resourceType: string;
+          source: string;
+          subjectType: string;
+          subjectRole: string | null;
+        }) =>
+          p.resourceType === "workspace" &&
+          p.source === "inherited" &&
+          p.subjectType === "role" &&
+          p.subjectRole === "editor"
+      )
+    ).toBe(true);
+  });
+});
+
+describe("#collections.permissions_all", () => {
+  it("should return all collection permissions for admin", async () => {
+    const admin = await buildAdmin();
+    const collection = await buildCollection({
+      teamId: admin.teamId,
+      userId: admin.id,
+      permission: null,
+    });
+    const anotherUser = await buildUser({
+      teamId: admin.teamId,
+    });
+
+    await Permission.create({
+      teamId: admin.teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: anotherUser.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: admin.id,
+    });
+
+    const res = await server.post("/api/collections.permissions_all", {
+      body: {
+        token: admin.getJwtToken(),
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          subjectId: string | null;
+          resourceType: string;
+          resourceId: string | null;
+        }) =>
+          p.subjectId === anotherUser.id &&
+          p.resourceType === "collection" &&
+          p.resourceId === collection.id
+      )
+    ).toBe(true);
+  });
+
+  it("should require admin role", async () => {
+    const user = await buildUser();
+    const res = await server.post("/api/collections.permissions_all", {
+      body: {
+        token: user.getJwtToken(),
+      },
+    });
+
+    expect(res.status).toEqual(403);
+  });
+
+  it("should include workspace-level inherited permissions", async () => {
+    const admin = await buildAdmin();
+
+    await Permission.create({
+      teamId: admin.teamId,
+      subjectType: PermissionSubjectType.Role,
+      subjectId: null,
+      subjectRole: "editor",
+      resourceType: PermissionResourceType.Workspace,
+      resourceId: null,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: admin.id,
+    });
+
+    const res = await server.post("/api/collections.permissions_all", {
+      body: {
+        token: admin.getJwtToken(),
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          resourceType: string;
+          source: string;
+          subjectType: string;
+          subjectRole: string | null;
+        }) =>
+          p.resourceType === "workspace" &&
+          p.source === "direct" &&
+          p.subjectType === "role" &&
+          p.subjectRole === "editor"
+      )
+    ).toBe(true);
+  });
+
+  it("should include document permissions in admin audit list", async () => {
+    const admin = await buildAdmin();
+    const document = await buildDocument({
+      teamId: admin.teamId,
+      userId: admin.id,
+    });
+    const anotherUser = await buildUser({
+      teamId: admin.teamId,
+    });
+
+    await Permission.create({
+      teamId: admin.teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: anotherUser.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Document,
+      resourceId: document.id,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: admin.id,
+    });
+
+    const res = await server.post("/api/collections.permissions_all", {
+      body: {
+        token: admin.getJwtToken(),
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          subjectId: string | null;
+          resourceType: string;
+          resourceId: string | null;
+        }) =>
+          p.subjectId === anotherUser.id &&
+          p.resourceType === "document" &&
+          p.resourceId === document.id
+      )
+    ).toBe(true);
+  });
+
+  it("should include published public shares in admin audit list", async () => {
+    const admin = await buildAdmin();
+    const document = await buildDocument({
+      teamId: admin.teamId,
+      userId: admin.id,
+    });
+
+    const share = await buildShare({
+      teamId: admin.teamId,
+      userId: admin.id,
+      documentId: document.id,
+      collectionId: null,
+      published: true,
+      revokedAt: null,
+      urlId: "audit-link",
+    });
+
+    const res = await server.post("/api/collections.permissions_all", {
+      body: {
+        token: admin.getJwtToken(),
+      },
+    });
+    const body = await res.json();
+
+    expect(res.status).toEqual(200);
+    expect(
+      body.data.some(
+        (p: {
+          source: string;
+          resourceType: string;
+          resourceId: string | null;
+          shareId: string | null;
+          subjectRole: string | null;
+          permission: string;
+        }) =>
+          p.source === "public_share" &&
+          p.resourceType === "document" &&
+          p.resourceId === document.id &&
+          p.shareId === share.id &&
+          p.subjectRole === "external" &&
+          p.permission === "read"
+      )
+    ).toBe(true);
+  });
+});
+
 describe("#collections.memberships", () => {
   it("should return members in private collection", async () => {
     const team = await buildTeam();
@@ -1083,15 +1575,14 @@ describe("#collections.memberships", () => {
         id: collection.id,
       },
     });
-    const [membership] = await collection.$get("memberships");
     const body = await res.json();
     expect(res.status).toEqual(200);
     expect(body.data.users.length).toEqual(1);
     expect(body.data.users[0].id).toEqual(user.id);
     expect(body.data.memberships.length).toEqual(1);
-    expect(body.data.memberships[0].id).toEqual(membership.id);
+    expect(body.data.memberships[0].userId).toEqual(user.id);
     expect(body.data.memberships[0].permission).toEqual(
-      CollectionPermission.Admin
+      CollectionPermission.Manage
     );
   });
 
@@ -1105,11 +1596,16 @@ describe("#collections.memberships", () => {
     const user2 = await buildUser({
       name: "Won't find",
     });
-    await UserMembership.create({
-      createdById: user2.id,
-      collectionId: collection.id,
-      userId: user2.id,
-      permission: CollectionPermission.ReadWrite,
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user2.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
     const res = await server.post("/api/collections.memberships", {
       body: {
@@ -1131,18 +1627,29 @@ describe("#collections.memberships", () => {
       userId: user.id,
       teamId: team.id,
     });
-    const user2 = await buildUser();
-    await UserMembership.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: CollectionPermission.ReadWrite,
+    const user2 = await buildUser({ teamId: team.id });
+    const user3 = await buildUser({ teamId: team.id });
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user2.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
-    await UserMembership.create({
-      createdById: user2.id,
-      collectionId: collection.id,
-      userId: user2.id,
-      permission: CollectionPermission.Read,
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user3.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
     const res = await server.post("/api/collections.memberships", {
       body: {
@@ -1154,7 +1661,7 @@ describe("#collections.memberships", () => {
     const body = await res.json();
     expect(res.status).toEqual(200);
     expect(body.data.users.length).toEqual(1);
-    expect(body.data.users[0].id).toEqual(user2.id);
+    expect(body.data.users[0].id).toEqual(user3.id);
   });
 
   it("should require authentication", async () => {
@@ -1235,7 +1742,7 @@ describe("#collections.info", () => {
     expect(body.data.urlId).toEqual(collection.urlId);
   });
 
-  it("should require user member of collection", async () => {
+  it("should allow collection owner even after membership removal", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -1244,11 +1751,10 @@ describe("#collections.info", () => {
     });
     collection.permission = null;
     await collection.save();
-    await UserMembership.destroy({
-      where: {
-        collectionId: collection.id,
-        userId: user.id,
-      },
+    await removeCollectionUserPermission({
+      teamId: team.id,
+      collectionId: collection.id,
+      userId: user.id,
     });
     const res = await server.post("/api/collections.info", {
       body: {
@@ -1256,7 +1762,7 @@ describe("#collections.info", () => {
         id: collection.id,
       },
     });
-    expect(res.status).toEqual(403);
+    expect(res.status).toEqual(200);
   });
 
   it("should allow user member of collection", async () => {
@@ -1268,11 +1774,12 @@ describe("#collections.info", () => {
     });
     collection.permission = null;
     await collection.save();
-    await UserMembership.create({
+    await upsertCollectionUserPermission({
+      teamId: team.id,
       collectionId: collection.id,
       userId: user.id,
-      createdById: user.id,
       permission: CollectionPermission.Read,
+      createdById: user.id,
     });
     const res = await server.post("/api/collections.info", {
       body: {
@@ -1329,6 +1836,58 @@ describe("#collections.create", () => {
     expect(body.data.sort.direction).toBe("asc");
     expect(body.policies.length).toBe(1);
     expect(body.policies[0].abilities.read).toBeTruthy();
+  });
+
+  it("should persist default viewer permission for read collections", async () => {
+    const user = await buildUser();
+    const res = await server.post("/api/collections.create", {
+      body: {
+        token: user.getJwtToken(),
+        name: "Read Collection",
+        permission: CollectionPermission.Read,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const grant = await Permission.findOne({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Role,
+        subjectRole: "viewer",
+        resourceType: PermissionResourceType.Collection,
+        resourceId: body.data.id,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Children,
+      },
+    });
+    expect(grant).toBeTruthy();
+  });
+
+  it("should persist default editor permission for read_write collections", async () => {
+    const user = await buildUser();
+    const res = await server.post("/api/collections.create", {
+      body: {
+        token: user.getJwtToken(),
+        name: "Edit Collection",
+        permission: CollectionPermission.Edit,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+
+    const grant = await Permission.findOne({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Role,
+        subjectRole: "editor",
+        resourceType: PermissionResourceType.Collection,
+        resourceId: body.data.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+      },
+    });
+    expect(grant).toBeTruthy();
   });
 
   it("should error when index is invalid", async () => {
@@ -1627,24 +2186,25 @@ describe("#collections.update", () => {
     const collection = await buildCollection({ teamId: team.id });
     collection.permission = null;
     await collection.save();
-    await UserMembership.create({
+    await upsertCollectionUserPermission({
+      teamId: team.id,
       collectionId: collection.id,
       userId: admin.id,
+      permission: CollectionPermission.Edit,
       createdById: admin.id,
-      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.update", {
       body: {
         token: admin.getJwtToken(),
         id: collection.id,
-        permission: CollectionPermission.ReadWrite,
+        permission: CollectionPermission.Edit,
         name: "Test",
       },
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
     expect(body.data.name).toBe("Test");
-    expect(body.data.permission).toBe(CollectionPermission.ReadWrite);
+    expect(body.data.permission).toBe(CollectionPermission.Edit);
     // ensure we return with a write level policy
     expect(body.policies.length).toBe(1);
     expect(body.policies[0].abilities.update).toBeTruthy();
@@ -1656,11 +2216,12 @@ describe("#collections.update", () => {
     const collection = await buildCollection({ teamId: team.id });
     collection.permission = null;
     await collection.save();
-    await UserMembership.create({
+    await upsertCollectionUserPermission({
+      teamId: team.id,
       collectionId: collection.id,
       userId: admin.id,
+      permission: CollectionPermission.Edit,
       createdById: admin.id,
-      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.update", {
       body: {
@@ -1689,11 +2250,16 @@ describe("#collections.update", () => {
         createdById: user.id,
       },
     });
-    await collection.$add("group", group, {
-      through: {
-        permission: CollectionPermission.Admin,
-        createdById: user.id,
-      },
+    await Permission.create({
+      teamId: user.teamId,
+      subjectType: PermissionSubjectType.Group,
+      subjectId: group.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Manage,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
     const res = await server.post("/api/collections.update", {
       body: {
@@ -1708,7 +2274,7 @@ describe("#collections.update", () => {
     expect(body.policies.length).toBe(1);
   });
 
-  it("does not allow editing by read-only collection user", async () => {
+  it("allows editing by collection owner even with read-only membership", async () => {
     const team = await buildTeam();
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
@@ -1717,18 +2283,13 @@ describe("#collections.update", () => {
     });
     collection.permission = null;
     await collection.save();
-    await UserMembership.update(
-      {
-        createdById: user.id,
-        permission: CollectionPermission.Read,
-      },
-      {
-        where: {
-          collectionId: collection.id,
-          userId: user.id,
-        },
-      }
-    );
+    await upsertCollectionUserPermission({
+      teamId: team.id,
+      collectionId: collection.id,
+      userId: user.id,
+      permission: CollectionPermission.Read,
+      createdById: user.id,
+    });
     const res = await server.post("/api/collections.update", {
       body: {
         token: user.getJwtToken(),
@@ -1736,7 +2297,65 @@ describe("#collections.update", () => {
         name: "Test",
       },
     });
-    expect(res.status).toEqual(403);
+    expect(res.status).toEqual(200);
+  });
+
+  it("does not escalate actor direct grant when updating privacy", async () => {
+    const team = await buildTeam();
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      userId: user.id,
+      teamId: team.id,
+      permission: null,
+    });
+
+    await Permission.destroy({
+      where: {
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+      },
+      force: true,
+    });
+
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
+    });
+
+    const res = await server.post("/api/collections.update", {
+      body: {
+        token: user.getJwtToken(),
+        id: collection.id,
+        permission: CollectionPermission.Edit,
+      },
+    });
+
+    expect(res.status).toEqual(200);
+
+    const grants = await Permission.findAll({
+      where: {
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        inheritMode: PermissionInheritMode.Children,
+        deletedAt: null,
+      },
+    });
+
+    expect(grants).toHaveLength(1);
+    expect(grants[0].permission).toBe(PermissionLevel.Read);
   });
 
   it("does not allow setting unknown sort fields", async () => {
@@ -1875,11 +2494,16 @@ describe("#collections.delete", () => {
         createdById: user.id,
       },
     });
-    await collection.$add("group", group, {
-      through: {
-        permission: CollectionPermission.Admin,
-        createdById: user.id,
-      },
+    await Permission.create({
+      teamId: user.teamId,
+      subjectType: PermissionSubjectType.Group,
+      subjectId: group.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: PermissionLevel.Manage,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
     const res = await server.post("/api/collections.delete", {
       body: {

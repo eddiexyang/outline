@@ -32,7 +32,6 @@ import {
   IsNumeric,
   IsDate,
   AllowNull,
-  BelongsToMany,
   Unique,
   AfterUpdate,
   IsFloat,
@@ -51,18 +50,19 @@ import { DocumentValidation } from "@shared/validations";
 import { InvalidRequestError, ValidationError } from "@server/errors";
 import { generateUrlId } from "@server/utils/url";
 import { createContext } from "@server/context";
+import { sequelize } from "@server/storage/database";
 import Collection from "./Collection";
 import FileOperation from "./FileOperation";
-import Group from "./Group";
-import GroupMembership from "./GroupMembership";
-import GroupUser from "./GroupUser";
 import Import from "./Import";
+import Permission, {
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "./Permission";
 import Relationship from "./Relationship";
 import Revision from "./Revision";
 import Star from "./Star";
 import Team from "./Team";
 import User from "./User";
-import UserMembership from "./UserMembership";
 import View from "./View";
 import ArchivableModel from "./base/ArchivableModel";
 import Fix from "./decorators/Fix";
@@ -175,59 +175,59 @@ type AdditionalFindOptions = {
       ],
     };
   },
-  withMembership: (userId: string, paranoid = true) => {
+  withPermissionGrants: (userId: string, paranoid = true) => {
     if (!userId) {
       return {};
     }
 
+    const escapedUserId = sequelize.escape(userId);
+
     return {
       include: [
+        {
+          association: "permissionGrants",
+          required: false,
+          where: {
+            deletedAt: null,
+            [Op.or]: [
+              {
+                subjectType: PermissionSubjectType.User,
+                subjectId: userId,
+              },
+              {
+                subjectType: PermissionSubjectType.Role,
+                subjectRole: {
+                  [Op.eq]: Sequelize.literal(`(
+                    SELECT u."role"::text
+                    FROM "users" u
+                    WHERE u."id" = ${escapedUserId}
+                  )`),
+                },
+              },
+              {
+                subjectType: PermissionSubjectType.Group,
+                subjectId: {
+                  [Op.in]: Sequelize.literal(`(
+                    SELECT gu."groupId"
+                    FROM "group_users" gu
+                    WHERE gu."userId" = ${escapedUserId}
+                  )`),
+                },
+              },
+            ],
+          },
+        },
         {
           model: userId
             ? Collection.scope([
                 "defaultScope",
                 {
-                  method: ["withMembership", userId],
+                  method: ["withPermissionGrants", userId],
                 },
               ])
             : Collection,
           as: "collection",
           paranoid,
-        },
-        {
-          association: "memberships",
-          where: {
-            userId,
-          },
-          required: false,
-        },
-        {
-          association: "groupMemberships",
-          required: false,
-          // use of "separate" property: sequelize breaks when there are
-          // nested "includes" with alternating values for "required"
-          // see https://github.com/sequelize/sequelize/issues/9869
-          separate: true,
-          // include for groups that are members of this document,
-          // of which userId is a member of, resulting in:
-          // GroupMembership [inner join] Group [inner join] GroupUser [where] userId
-          include: [
-            {
-              model: Group,
-              as: "group",
-              required: true,
-              include: [
-                {
-                  model: GroupUser,
-                  as: "groupUsers",
-                  required: true,
-                  where: {
-                    userId,
-                  },
-                },
-              ],
-            },
-          ],
         },
       ],
     };
@@ -235,34 +235,20 @@ type AdditionalFindOptions = {
   withAllMemberships: {
     include: [
       {
-        association: "memberships",
+        association: "permissionGrants",
         required: false,
+        where: {
+          deletedAt: null,
+          subjectType: PermissionSubjectType.User,
+        },
       },
       {
-        model: GroupMembership,
-        as: "groupMemberships",
+        association: "permissionGrants",
         required: false,
-        // use of "separate" property: sequelize breaks when there are
-        // nested "includes" with alternating values for "required"
-        // see https://github.com/sequelize/sequelize/issues/9869
-        separate: true,
-        // include for groups that are members of this collection,
-        // of which userId is a member of, resulting in:
-        // CollectionGroup [inner join] Group [inner join] GroupUser [where] userId
-        include: [
-          {
-            model: Group,
-            as: "group",
-            required: true,
-            include: [
-              {
-                model: GroupUser,
-                as: "groupUsers",
-                required: true,
-              },
-            ],
-          },
-        ],
+        where: {
+          deletedAt: null,
+          subjectType: PermissionSubjectType.Group,
+        },
       },
     ],
   },
@@ -655,18 +641,19 @@ class Document extends ArchivableModel<
   @BelongsTo(() => Collection, "collectionId")
   collection: Collection | null;
 
-  @BelongsToMany(() => User, () => UserMembership)
-  users: User[];
-
   @ForeignKey(() => Collection)
   @Column(DataType.UUID)
   collectionId?: string | null;
 
-  @HasMany(() => UserMembership)
-  memberships: UserMembership[];
-
-  @HasMany(() => GroupMembership, "documentId")
-  groupMemberships: GroupMembership[];
+  @HasMany(() => Permission, {
+    foreignKey: "resourceId",
+    constraints: false,
+    scope: {
+      resourceType: PermissionResourceType.Document,
+    },
+    as: "permissionGrants",
+  })
+  permissionGrants: Permission[];
 
   @HasMany(() => Revision)
   revisions: Revision[];
@@ -680,32 +667,7 @@ class Document extends ArchivableModel<
   @HasMany(() => View)
   views: View[];
 
-  /**
-   * Returns an array of unique userIds that are members of a document
-   * either via group or direct membership.
-   *
-   * @param documentId
-   * @returns userIds
-   */
-  static async membershipUserIds(documentId: string) {
-    const document = await this.scope("withAllMemberships").findOne({
-      where: { id: documentId },
-    });
-    if (!document) {
-      return [];
-    }
-
-    const groupMemberships = document.groupMemberships
-      .map((gm) => gm.group.groupUsers)
-      .flat();
-    const membershipUserIds = [
-      ...groupMemberships,
-      ...document.memberships,
-    ].map((membership) => membership.userId);
-    return uniq(membershipUserIds);
-  }
-
-  static withMembershipScope(
+  static withPermissionScope(
     userId: string,
     options?: FindOptions<Document> & { includeDrafts?: boolean }
   ) {
@@ -716,7 +678,7 @@ class Document extends ArchivableModel<
         method: ["withViews", userId],
       },
       {
-        method: ["withMembership", userId, options?.paranoid],
+        method: ["withPermissionGrants", userId, options?.paranoid],
       },
     ]);
   }
@@ -766,7 +728,7 @@ class Document extends ArchivableModel<
           ]
         : []) as ScopeOptions[]),
       {
-        method: ["withMembership", userId, rest.paranoid],
+        method: ["withPermissionGrants", userId, rest.paranoid],
       },
     ]);
 
@@ -833,7 +795,7 @@ class Document extends ArchivableModel<
           ]
         : []) as ScopeOptions[]),
       {
-        method: ["withMembership", userId],
+        method: ["withPermissionGrants", userId],
       },
     ]).findAll({
       where: {
@@ -848,12 +810,29 @@ class Document extends ArchivableModel<
     }
 
     return documents.filter(
-      (doc) =>
-        (!doc.collection?.isPrivate && !user?.isGuest) ||
-        (doc.collection?.memberships.length || 0) > 0 ||
-        (doc.collection?.groupMemberships.length || 0) > 0 ||
-        doc.memberships.length > 0 ||
-        doc.groupMemberships.length > 0
+      (doc) => {
+        const collectionId = doc.getDataValue("collectionId");
+
+        if (doc.permissionGrants.length > 0) {
+          return true;
+        }
+
+        if (!collectionId) {
+          return true;
+        }
+
+        // If the collection join is missing for a collection-backed document,
+        // treat it as inaccessible for this user.
+        if (!doc.collection) {
+          return false;
+        }
+
+        if (!doc.collection.isPrivate) {
+          return true;
+        }
+
+        return doc.collection.permissionGrants.length > 0;
+      }
     );
   }
 
@@ -1036,24 +1015,6 @@ class Document extends ArchivableModel<
           this.collection.documentStructure = collection.documentStructure;
         }
       }
-    }
-
-    // Copy the group and user memberships from the parent document, if any
-    if (this.parentDocumentId) {
-      await GroupMembership.copy(
-        {
-          documentId: this.parentDocumentId,
-        },
-        this,
-        { transaction }
-      );
-      await UserMembership.copy(
-        {
-          documentId: this.parentDocumentId,
-        },
-        this,
-        { transaction }
-      );
     }
 
     this.lastModifiedById = user.id;

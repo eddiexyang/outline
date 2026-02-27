@@ -61,7 +61,7 @@ import Length from "./validators/Length";
           "deletedAt",
         ],
         model: Collection.scope({
-          method: ["withMembership", userId],
+          method: ["withPermissionGrants", userId],
         }),
         as: "collection",
       },
@@ -69,7 +69,7 @@ import Length from "./validators/Length";
         model: Document.scope([
           "withDrafts",
           {
-            method: ["withMembership", userId],
+            method: ["withPermissionGrants", userId],
           },
         ]),
         paranoid: true,
@@ -86,7 +86,7 @@ import Length from "./validators/Length";
               "deletedAt",
             ],
             model: Collection.scope({
-              method: ["withMembership", userId],
+              method: ["withPermissionGrants", userId],
             }),
             as: "collection",
           },

@@ -25,8 +25,8 @@ function ConfirmMoveDialog({ collection, item, ...rest }: Props) {
   const prevCollection = collections.get(item.collectionId!);
   const accessMapping: Record<Partial<CollectionPermission> | "null", string> =
     {
-      [CollectionPermission.Admin]: t("manage access"),
-      [CollectionPermission.ReadWrite]: t("view and edit access"),
+      [CollectionPermission.Manage]: t("manage access"),
+      [CollectionPermission.Edit]: t("view and edit access"),
       [CollectionPermission.Read]: t("view only access"),
       null: t("no access"),
     };

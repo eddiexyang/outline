@@ -61,14 +61,14 @@ type AdditionalFindOptions = {
   },
 }))
 @Scopes(() => ({
-  withMembership: (userId: string, paranoid = true) => ({
+  withPermissionGrants: (userId: string, paranoid = true) => ({
     include: [
       {
         model: userId
           ? Collection.scope([
               "defaultScope",
               {
-                method: ["withMembership", userId],
+                method: ["withPermissionGrants", userId],
               },
             ])
           : Collection,
@@ -246,7 +246,7 @@ class Template extends ParanoidModel<
     const scope = this.scope([
       "defaultScope",
       {
-        method: ["withMembership", userId, rest.paranoid],
+        method: ["withPermissionGrants", userId, rest.paranoid],
       },
     ]);
 

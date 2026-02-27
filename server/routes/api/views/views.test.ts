@@ -1,6 +1,12 @@
 import { CollectionPermission } from "@shared/types";
 import { createContext } from "@server/context";
-import { View, UserMembership } from "@server/models";
+import { Permission, View } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildAdmin,
   buildCollection,
@@ -11,6 +17,12 @@ import {
 import { getTestServer } from "@server/test/support";
 
 const server = getTestServer();
+const toCollectionLevel = (permission: CollectionPermission) =>
+  permission === CollectionPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === CollectionPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
 
 describe("#views.list", () => {
   it("should return views for a document", async () => {
@@ -72,11 +84,16 @@ describe("#views.list", () => {
     });
     collection.permission = null;
     await collection.save();
-    await UserMembership.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: CollectionPermission.Read,
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: toCollectionLevel(CollectionPermission.Read),
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: user.id,
     });
     await View.incrementOrCreate(createContext({ user }), {
       documentId: document.id,
@@ -151,11 +168,16 @@ describe("#views.create", () => {
     });
     collection.permission = null;
     await collection.save();
-    await UserMembership.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: CollectionPermission.Read,
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Collection,
+      resourceId: collection.id,
+      permission: toCollectionLevel(CollectionPermission.Read),
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: user.id,
     });
     const res = await server.post("/api/views.create", {
       body: {

@@ -35,6 +35,28 @@ export default class ShutdownHelper {
   /** List of shutdown handlers to execute */
   private static handlers: Handler[] = [];
 
+  private static async runHandlers() {
+    const shutdownGroups = groupBy(this.handlers, "order");
+    const orderedKeys = Object.keys(shutdownGroups).sort();
+
+    for (const key of orderedKeys) {
+      Logger.debug("lifecycle", `Running shutdown group ${key}`);
+      const handlers = shutdownGroups[key];
+
+      await Promise.allSettled(
+        handlers.map(async (handler) => {
+          Logger.debug("lifecycle", `Running shutdown handler ${handler.key}`);
+
+          await handler.callback().catch((error) => {
+            Logger.error(`Error inside shutdown handler ${handler.key}`, error, {
+              key: handler.key,
+            });
+          });
+        })
+      );
+    }
+  }
+
   /**
    * Add a shutdown handler to be executed when the process is exiting
    *
@@ -75,33 +97,14 @@ export default class ShutdownHelper {
       process.exit(1);
     });
 
-    // Group handlers by order
-    const shutdownGroups = groupBy(this.handlers, "order");
-    const orderedKeys = Object.keys(shutdownGroups).sort();
-
-    // Execute handlers in order
-    for (const key of orderedKeys) {
-      Logger.debug("lifecycle", `Running shutdown group ${key}`);
-      const handlers = shutdownGroups[key];
-
-      await Promise.allSettled(
-        handlers.map(async (handler) => {
-          Logger.debug("lifecycle", `Running shutdown handler ${handler.key}`);
-
-          await handler.callback().catch((error) => {
-            Logger.error(
-              `Error inside shutdown handler ${handler.key}`,
-              error,
-              {
-                key: handler.key,
-              }
-            );
-          });
-        })
-      );
-    }
+    await this.runHandlers();
 
     Logger.info("lifecycle", "Gracefully quitting");
     process.exit(code);
+  }
+
+  public static async executeForTest() {
+    await this.runHandlers();
+    this.handlers = [];
   }
 }

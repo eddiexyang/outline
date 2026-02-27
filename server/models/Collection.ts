@@ -4,7 +4,6 @@ import find from "lodash/find";
 import findIndex from "lodash/findIndex";
 import isNil from "lodash/isNil";
 import remove from "lodash/remove";
-import uniq from "lodash/uniq";
 import type {
   Identifier,
   Transaction,
@@ -32,7 +31,6 @@ import {
   BeforeSave,
   AfterCreate,
   HasMany,
-  BelongsToMany,
   BelongsTo,
   ForeignKey,
   Scopes,
@@ -60,6 +58,7 @@ import slugify from "@shared/utils/slugify";
 import { CollectionValidation } from "@shared/validations";
 import { ValidationError } from "@server/errors";
 import type { APIContext } from "@server/types";
+import { sequelize } from "@server/storage/database";
 import { CacheHelper } from "@server/utils/CacheHelper";
 import { RedisPrefixHelper } from "@server/utils/RedisPrefixHelper";
 import removeIndexCollision from "@server/utils/removeIndexCollision";
@@ -67,13 +66,15 @@ import { generateUrlId } from "@server/utils/url";
 import { ValidateIndex } from "@server/validation";
 import Document from "./Document";
 import FileOperation from "./FileOperation";
-import Group from "./Group";
-import GroupMembership from "./GroupMembership";
-import GroupUser from "./GroupUser";
 import Import from "./Import";
+import Permission, {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "./Permission";
 import Team from "./Team";
 import User from "./User";
-import UserMembership from "./UserMembership";
 import ParanoidModel from "./base/ParanoidModel";
 import Fix from "./decorators/Fix";
 import { DocumentHelper } from "./helpers/DocumentHelper";
@@ -98,35 +99,20 @@ type AdditionalFindOptions = {
   withAllMemberships: {
     include: [
       {
-        model: UserMembership,
-        as: "memberships",
+        association: "permissionGrants",
         required: false,
+        where: {
+          deletedAt: null,
+          subjectType: PermissionSubjectType.User,
+        },
       },
       {
-        model: GroupMembership,
-        as: "groupMemberships",
+        association: "permissionGrants",
         required: false,
-        // use of "separate" property: sequelize breaks when there are
-        // nested "includes" with alternating values for "required"
-        // see https://github.com/sequelize/sequelize/issues/9869
-        separate: true,
-        // include for groups that are members of this collection,
-        // of which userId is a member of, resulting in:
-        // GroupMembership [inner join] Group [inner join] GroupUser [where] userId
-        include: [
-          {
-            model: Group,
-            as: "group",
-            required: true,
-            include: [
-              {
-                model: GroupUser,
-                as: "groupUsers",
-                required: true,
-              },
-            ],
-          },
-        ],
+        where: {
+          deletedAt: null,
+          subjectType: PermissionSubjectType.Group,
+        },
       },
     ],
   },
@@ -152,48 +138,53 @@ type AdditionalFindOptions = {
       exclude: [],
     },
   }),
-  withMembership: (userId: string) => {
+  withPermissionGrants: (userId: string) => {
     if (!userId) {
       return {};
     }
 
+    const escapedUserId = sequelize.escape(userId);
+
     return {
       include: [
         {
-          association: "memberships",
+          association: "permissionGrants",
+          required: false,
           where: {
-            userId,
-          },
-          required: false,
-        },
-        {
-          model: GroupMembership,
-          as: "groupMemberships",
-          required: false,
-          // use of "separate" property: sequelize breaks when there are
-          // nested "includes" with alternating values for "required"
-          // see https://github.com/sequelize/sequelize/issues/9869
-          separate: true,
-          // include for groups that are members of this collection,
-          // of which userId is a member of, resulting in:
-          // CollectionGroup [inner join] Group [inner join] GroupUser [where] userId
-          include: [
-            {
-              model: Group,
-              as: "group",
-              required: true,
-              include: [
-                {
-                  model: GroupUser,
-                  as: "groupUsers",
-                  required: true,
-                  where: {
-                    userId,
+            deletedAt: null,
+            [Op.or]: [
+              {
+                subjectType: PermissionSubjectType.User,
+                subjectId: userId,
+              },
+              {
+                subjectType: PermissionSubjectType.Role,
+                [Op.or]: [
+                  {
+                    subjectRole: {
+                      [Op.eq]: Sequelize.literal(`(
+                        SELECT u."role"::text
+                        FROM "users" u
+                        WHERE u."id" = ${escapedUserId}
+                      )`),
+                    },
                   },
+                  { subjectRole: "viewer" },
+                  { subjectRole: "editor" },
+                ],
+              },
+              {
+                subjectType: PermissionSubjectType.Group,
+                subjectId: {
+                  [Op.in]: Sequelize.literal(`(
+                    SELECT gu."groupId"
+                    FROM "group_users" gu
+                    WHERE gu."userId" = ${escapedUserId}
+                  )`),
                 },
-              ],
-            },
-          ],
+              },
+            ],
+          },
         },
       ],
     };
@@ -339,6 +330,7 @@ class Collection extends ParanoidModel<
   @BeforeValidate
   static async onBeforeValidate(model: Collection) {
     model.urlId = model.urlId || generateUrlId();
+    model.ownerId = model.ownerId || model.createdById;
   }
 
   @BeforeSave
@@ -378,7 +370,10 @@ class Collection extends ParanoidModel<
 
   @BeforeDestroy
   static async checkLastCollection(model: Collection) {
-    const total = await this.count({
+    const boundModel = model.constructor as typeof Collection;
+    const total = await boundModel.unscoped().count({
+      distinct: true,
+      col: "id",
       where: {
         teamId: model.teamId,
       },
@@ -437,22 +432,118 @@ class Collection extends ParanoidModel<
     model: Collection,
     options: { transaction: Transaction }
   ) {
-    const existing = await UserMembership.findOne({
-      where: {
-        collectionId: model.id,
-        userId: model.createdById,
-      },
+    model.ownerId = model.createdById;
+    await model.save({
       transaction: options.transaction,
+      hooks: false,
     });
 
-    if (!existing) {
-      return UserMembership.create(
+    await Permission.create(
+      {
+        teamId: model.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: model.createdById,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: model.id,
+        permission: PermissionLevel.Manage,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: model.createdById,
+      },
+      {
+        transaction: options.transaction,
+        hooks: false,
+      }
+    );
+
+    await Permission.bulkCreate(
+      [
         {
-          collectionId: model.id,
-          userId: model.createdById,
-          permission: CollectionPermission.Admin,
-          createdById: model.createdById,
+          teamId: model.teamId,
+          subjectType: PermissionSubjectType.Role,
+          subjectId: null,
+          subjectRole: "admin",
+          resourceType: PermissionResourceType.Collection,
+          resourceId: model.id,
+          permission: PermissionLevel.Manage,
+          inheritMode: PermissionInheritMode.Children,
+          grantedById: model.createdById,
         },
+        {
+          teamId: model.teamId,
+          subjectType: PermissionSubjectType.Role,
+          subjectId: null,
+          subjectRole: "manager",
+          resourceType: PermissionResourceType.Collection,
+          resourceId: model.id,
+          permission: PermissionLevel.Manage,
+          inheritMode: PermissionInheritMode.Children,
+          grantedById: model.createdById,
+        },
+      ],
+      {
+        transaction: options.transaction,
+        hooks: false,
+      }
+    );
+
+    if (model.permission === CollectionPermission.Read) {
+      await Permission.bulkCreate(
+        [
+          {
+            teamId: model.teamId,
+            subjectType: PermissionSubjectType.Role,
+            subjectId: null,
+            subjectRole: "viewer",
+            resourceType: PermissionResourceType.Collection,
+            resourceId: model.id,
+            permission: PermissionLevel.Read,
+            inheritMode: PermissionInheritMode.Children,
+            grantedById: model.createdById,
+          },
+          {
+            teamId: model.teamId,
+            subjectType: PermissionSubjectType.Role,
+            subjectId: null,
+            subjectRole: "editor",
+            resourceType: PermissionResourceType.Collection,
+            resourceId: model.id,
+            permission: PermissionLevel.Read,
+            inheritMode: PermissionInheritMode.Children,
+            grantedById: model.createdById,
+          },
+        ],
+        {
+          transaction: options.transaction,
+          hooks: false,
+        }
+      );
+    } else if (model.permission === CollectionPermission.Edit) {
+      await Permission.bulkCreate(
+        [
+          {
+            teamId: model.teamId,
+            subjectType: PermissionSubjectType.Role,
+            subjectId: null,
+            subjectRole: "viewer",
+            resourceType: PermissionResourceType.Collection,
+            resourceId: model.id,
+            permission: PermissionLevel.Read,
+            inheritMode: PermissionInheritMode.Children,
+            grantedById: model.createdById,
+          },
+          {
+            teamId: model.teamId,
+            subjectType: PermissionSubjectType.Role,
+            subjectId: null,
+            subjectRole: "editor",
+            resourceType: PermissionResourceType.Collection,
+            resourceId: model.id,
+            permission: PermissionLevel.Edit,
+            inheritMode: PermissionInheritMode.Children,
+            grantedById: model.createdById,
+          },
+        ],
         {
           transaction: options.transaction,
           hooks: false,
@@ -460,7 +551,7 @@ class Collection extends ParanoidModel<
       );
     }
 
-    return existing;
+    return;
   }
 
   @BeforeUpdate
@@ -521,17 +612,15 @@ class Collection extends ParanoidModel<
   @HasMany(() => Document, "collectionId")
   documents: Document[];
 
-  @HasMany(() => UserMembership, "collectionId")
-  memberships: UserMembership[];
-
-  @HasMany(() => GroupMembership, "collectionId")
-  groupMemberships: GroupMembership[];
-
-  @BelongsToMany(() => User, () => UserMembership)
-  users: User[];
-
-  @BelongsToMany(() => Group, () => GroupMembership)
-  groups: Group[];
+  @HasMany(() => Permission, {
+    foreignKey: "resourceId",
+    constraints: false,
+    scope: {
+      resourceType: PermissionResourceType.Collection,
+    },
+    as: "permissionGrants",
+  })
+  permissionGrants: Permission[];
 
   @BelongsTo(() => User, "createdById")
   user: User;
@@ -539,6 +628,13 @@ class Collection extends ParanoidModel<
   @ForeignKey(() => User)
   @Column(DataType.UUID)
   createdById: string;
+
+  @BelongsTo(() => User, "ownerId")
+  owner: User;
+
+  @ForeignKey(() => User)
+  @Column(DataType.UUID)
+  ownerId: string;
 
   @BelongsTo(() => Team, "teamId")
   team: Team;
@@ -552,31 +648,6 @@ class Collection extends ParanoidModel<
       field: "index",
       direction: "asc",
     };
-
-  /**
-   * Returns an array of unique userIds that are members of a collection,
-   * either via group or direct membership.
-   *
-   * @param collectionId
-   * @returns userIds
-   */
-  static async membershipUserIds(collectionId: string) {
-    const collection = await this.scope("withAllMemberships").findOne({
-      where: { id: collectionId },
-    });
-    if (!collection) {
-      return [];
-    }
-
-    const groupMemberships = collection.groupMemberships
-      .map((gm) => gm.group.groupUsers)
-      .flat();
-    const membershipUserIds = [
-      ...groupMemberships,
-      ...collection.memberships,
-    ].map((membership) => membership.userId);
-    return uniq(membershipUserIds);
-  }
 
   /**
    * Overrides the standard findByPk behavior to allow also querying by urlId
@@ -613,7 +684,7 @@ class Collection extends ParanoidModel<
     const scopes: (string | ScopeOptions)[] = [
       includeDocumentStructure ? "withDocumentStructure" : "defaultScope",
       {
-        method: ["withMembership", userId],
+        method: ["withPermissionGrants", userId],
       },
     ];
 
@@ -690,13 +761,50 @@ class Collection extends ParanoidModel<
 
   /**
    * Convenience method to return if a collection is considered private.
-   * This means that a membership is required to view it rather than just being
-   * a workspace member.
+   * This means explicit permission grants are required to view it rather than
+   * workspace-level role grants.
    *
    * @returns boolean
    */
   get isPrivate() {
-    return !this.permission;
+    return !this.effectivePermission;
+  }
+
+  /**
+   * Resolve the default collection permission from explicit role grants when they
+   * are loaded. Falls back to the legacy column value only if grants are absent.
+   */
+  get effectivePermission(): CollectionPermission | null {
+    if (Array.isArray(this.permissionGrants) && this.permissionGrants.length > 0) {
+      const roleGrants = this.permissionGrants.filter(
+        (grant) =>
+          grant.subjectType === PermissionSubjectType.Role &&
+          grant.inheritMode === PermissionInheritMode.Children &&
+          grant.resourceType === PermissionResourceType.Collection &&
+          grant.resourceId === this.id
+      );
+
+      const viewer = roleGrants.find((grant) => grant.subjectRole === "viewer");
+      const editor = roleGrants.find((grant) => grant.subjectRole === "editor");
+
+      if (
+        viewer?.permission === PermissionLevel.Read &&
+        editor?.permission === PermissionLevel.Edit
+      ) {
+        return CollectionPermission.Edit;
+      }
+
+      if (
+        viewer?.permission === PermissionLevel.Read &&
+        editor?.permission === PermissionLevel.Read
+      ) {
+        return CollectionPermission.Read;
+      }
+
+      return null;
+    }
+
+    return this.permission ?? null;
   }
 
   getDocumentTree = (documentId: string): NavigationNode | null => {

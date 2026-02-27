@@ -7,7 +7,7 @@ allow(User, "createShare", Team, (actor, team) =>
     //
     isTeamModel(actor, team),
     isTeamMutable(actor),
-    !actor.isGuest
+    !actor.isViewer
   )
 );
 
@@ -15,7 +15,7 @@ allow(User, "listShares", Team, (actor, team) =>
   and(
     //
     isTeamModel(actor, team),
-    !actor.isGuest
+    !actor.isViewer
   )
 );
 
@@ -23,14 +23,13 @@ allow(User, "read", Share, (actor, share) =>
   and(
     //
     isTeamModel(actor, share),
-    !actor.isGuest
+    !actor.isViewer
   )
 );
 
 allow(User, "update", Share, (actor, share) =>
   and(
     isTeamModel(actor, share),
-    !actor.isGuest,
     !actor.isViewer,
     or(
       can(actor, "share", share?.collection),
@@ -42,7 +41,6 @@ allow(User, "update", Share, (actor, share) =>
 allow(User, "revoke", Share, (actor, share) =>
   and(
     isTeamModel(actor, share),
-    !actor.isGuest,
     !actor.isViewer,
     or(actor.isAdmin, isOwner(actor, share))
   )

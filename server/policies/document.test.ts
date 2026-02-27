@@ -1,9 +1,14 @@
 import {
   CollectionPermission,
-  DocumentPermission,
   UserRole,
 } from "@shared/types";
-import { Document, UserMembership } from "@server/models";
+import { Document, Permission } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildUser,
   buildTeam,
@@ -11,6 +16,7 @@ import {
   buildDraftDocument,
   buildCollection,
   buildAdmin,
+  buildManager,
 } from "@server/test/factories";
 import { serialize } from "./index";
 
@@ -20,7 +26,7 @@ describe("read_write collection", () => {
     const user = await buildUser({ teamId: team.id });
     const collection = await buildCollection({
       teamId: team.id,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
     });
     const doc = await buildDocument({
       teamId: team.id,
@@ -33,10 +39,10 @@ describe("read_write collection", () => {
     expect(abilities.download).toBeTruthy();
     expect(abilities.update).toBeTruthy();
     expect(abilities.createChildDocument).toBeTruthy();
-    expect(abilities.manageUsers).toBeTruthy();
-    expect(abilities.archive).toBeTruthy();
-    expect(abilities.delete).toBeTruthy();
-    expect(abilities.share).toBeTruthy();
+    expect(abilities.manageUsers).toEqual(false);
+    expect(abilities.archive).toEqual(false);
+    expect(abilities.delete).toEqual(false);
+    expect(abilities.share).toEqual(false);
     expect(abilities.move).toBeTruthy();
     expect(abilities.comment).toBeTruthy();
   });
@@ -49,7 +55,7 @@ describe("read_write collection", () => {
     });
     const collection = await buildCollection({
       teamId: team.id,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
     });
     const doc = await buildDocument({
       teamId: team.id,
@@ -76,11 +82,11 @@ describe("read_write collection", () => {
     const team = await buildTeam();
     const user = await buildUser({
       teamId: team.id,
-      role: UserRole.Guest,
+      role: UserRole.Viewer,
     });
     const collection = await buildCollection({
       teamId: team.id,
-      permission: CollectionPermission.ReadWrite,
+      permission: CollectionPermission.Edit,
     });
     const doc = await buildDocument({
       teamId: team.id,
@@ -89,8 +95,8 @@ describe("read_write collection", () => {
     // reload to get membership
     const document = await Document.findByPk(doc.id, { userId: user.id });
     const abilities = serialize(user, document);
-    expect(abilities.read).toEqual(false);
-    expect(abilities.download).toEqual(false);
+    expect(abilities.read).toBeTruthy();
+    expect(abilities.download).toBeTruthy();
     expect(abilities.update).toEqual(false);
     expect(abilities.createChildDocument).toEqual(false);
     expect(abilities.manageUsers).toEqual(false);
@@ -98,9 +104,9 @@ describe("read_write collection", () => {
     expect(abilities.delete).toEqual(false);
     expect(abilities.share).toEqual(false);
     expect(abilities.move).toEqual(false);
-    expect(abilities.subscribe).toEqual(false);
-    expect(abilities.unsubscribe).toEqual(false);
-    expect(abilities.comment).toEqual(false);
+    expect(abilities.subscribe).toBeTruthy();
+    expect(abilities.unsubscribe).toBeTruthy();
+    expect(abilities.comment).toBeTruthy();
   });
 });
 
@@ -136,7 +142,7 @@ describe("read collection", () => {
     const team = await buildTeam();
     const user = await buildUser({
       teamId: team.id,
-      role: UserRole.Guest,
+      role: UserRole.Viewer,
     });
     const collection = await buildCollection({
       teamId: team.id,
@@ -149,8 +155,8 @@ describe("read collection", () => {
     // reload to get membership
     const document = await Document.findByPk(doc.id, { userId: user.id });
     const abilities = serialize(user, document);
-    expect(abilities.read).toEqual(false);
-    expect(abilities.download).toEqual(false);
+    expect(abilities.read).toBeTruthy();
+    expect(abilities.download).toBeTruthy();
     expect(abilities.update).toEqual(false);
     expect(abilities.createChildDocument).toEqual(false);
     expect(abilities.manageUsers).toEqual(false);
@@ -158,9 +164,9 @@ describe("read collection", () => {
     expect(abilities.delete).toEqual(false);
     expect(abilities.share).toEqual(false);
     expect(abilities.move).toEqual(false);
-    expect(abilities.subscribe).toEqual(false);
-    expect(abilities.unsubscribe).toEqual(false);
-    expect(abilities.comment).toEqual(false);
+    expect(abilities.subscribe).toBeTruthy();
+    expect(abilities.unsubscribe).toBeTruthy();
+    expect(abilities.comment).toBeTruthy();
   });
 });
 
@@ -195,7 +201,7 @@ describe("private collection", () => {
     const team = await buildTeam();
     const user = await buildUser({
       teamId: team.id,
-      role: UserRole.Guest,
+      role: UserRole.Viewer,
     });
     const collection = await buildCollection({
       teamId: team.id,
@@ -218,6 +224,38 @@ describe("private collection", () => {
     expect(abilities.subscribe).toEqual(false);
     expect(abilities.unsubscribe).toEqual(false);
     expect(abilities.comment).toEqual(false);
+  });
+
+  it("should allow read from explicit document permission grant", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const user = await buildUser({ teamId: team.id });
+    const collection = await buildCollection({
+      teamId: team.id,
+      permission: null,
+    });
+    const doc = await buildDocument({
+      teamId: team.id,
+      collectionId: collection.id,
+    });
+
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Document,
+      resourceId: doc.id,
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: admin.id,
+    });
+
+    const document = await Document.findByPk(doc.id, { userId: user.id });
+    const abilities = serialize(user, document);
+    expect(abilities.read).toBeTruthy();
+    expect(abilities.update).toEqual(false);
+    expect(abilities.share).toEqual(false);
   });
 });
 
@@ -246,7 +284,7 @@ describe("no collection", () => {
     const team = await buildTeam();
     const user = await buildUser({
       teamId: team.id,
-      role: UserRole.Guest,
+      role: UserRole.Viewer,
     });
     const document = await buildDraftDocument({
       teamId: team.id,
@@ -329,11 +367,16 @@ describe("read document", () => {
         teamId: team.id,
         collectionId: collection.id,
       });
-      await UserMembership.create({
-        userId: user.id,
-        documentId: doc.id,
-        permission: DocumentPermission.Read,
-        createdById: user.id,
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: doc.id,
+        permission: PermissionLevel.Read,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
       });
 
       // reload to get membership
@@ -371,11 +414,16 @@ describe("read_write document", () => {
         teamId: team.id,
         collectionId: collection.id,
       });
-      await UserMembership.create({
-        userId: user.id,
-        documentId: doc.id,
-        permission: DocumentPermission.ReadWrite,
-        createdById: user.id,
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: doc.id,
+        permission: PermissionLevel.Edit,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
       });
 
       // reload to get membership
@@ -384,14 +432,14 @@ describe("read_write document", () => {
       expect(abilities.read).toBeTruthy();
       expect(abilities.download).toBeTruthy();
       expect(abilities.update).toBeTruthy();
-      expect(abilities.delete).toBeTruthy();
+      expect(abilities.delete).toEqual(role === UserRole.Manager);
       expect(abilities.subscribe).toBeTruthy();
       expect(abilities.unsubscribe).toBeTruthy();
       expect(abilities.comment).toBeTruthy();
       expect(abilities.createChildDocument).toBeTruthy();
-      expect(abilities.manageUsers).toEqual(false);
-      expect(abilities.archive).toEqual(false);
-      expect(abilities.share).toEqual(false);
+      expect(abilities.manageUsers).toEqual(role === UserRole.Manager);
+      expect(abilities.archive).toEqual(role === UserRole.Manager);
+      expect(abilities.share).toEqual(role === UserRole.Manager);
       expect(abilities.move).toBeTruthy();
     });
   }
@@ -407,11 +455,16 @@ describe("read_write document", () => {
       teamId: team.id,
       collectionId: collection.id,
     });
-    await UserMembership.create({
-      userId: user.id,
-      documentId: doc.id,
-      permission: DocumentPermission.ReadWrite,
-      createdById: user.id,
+    await Permission.create({
+      teamId: team.id,
+      subjectType: PermissionSubjectType.User,
+      subjectId: user.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Document,
+      resourceId: doc.id,
+      permission: PermissionLevel.Edit,
+      inheritMode: PermissionInheritMode.Children,
+      grantedById: user.id,
     });
 
     // reload to get membership
@@ -427,7 +480,7 @@ describe("read_write document", () => {
     expect(abilities.createChildDocument).toBeTruthy();
     expect(abilities.manageUsers).toBeTruthy();
     expect(abilities.archive).toBeTruthy();
-    expect(abilities.share).toEqual(false);
+    expect(abilities.share).toBeTruthy();
     expect(abilities.move).toBeTruthy();
   });
 });
@@ -448,11 +501,16 @@ describe("manage document", () => {
         teamId: team.id,
         collectionId: collection.id,
       });
-      await UserMembership.create({
-        userId: user.id,
-        documentId: doc.id,
-        permission: DocumentPermission.Admin,
-        createdById: user.id,
+      await Permission.create({
+        teamId: team.id,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: doc.id,
+        permission: PermissionLevel.Manage,
+        inheritMode: PermissionInheritMode.Children,
+        grantedById: user.id,
       });
 
       // reload to get membership
@@ -469,7 +527,32 @@ describe("manage document", () => {
       expect(abilities.manageUsers).toBeTruthy();
       expect(abilities.archive).toBeTruthy();
       expect(abilities.move).toBeTruthy();
-      expect(abilities.share).toEqual(false);
+      expect(abilities.share).toEqual(role !== UserRole.Viewer);
     });
   }
+});
+
+describe("permanent delete", () => {
+  it("should allow admin to permanently delete deleted documents", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({ teamId: team.id });
+    const document = await buildDocument({ teamId: team.id, userId: admin.id });
+    await document.destroy();
+
+    const abilities = serialize(admin, document);
+    expect(abilities.permanentDelete).toBeTruthy();
+  });
+
+  it("should not allow manager to permanently delete deleted documents", async () => {
+    const team = await buildTeam();
+    const manager = await buildManager({ teamId: team.id });
+    const document = await buildDocument({
+      teamId: team.id,
+      userId: manager.id,
+    });
+    await document.destroy();
+
+    const abilities = serialize(manager, document);
+    expect(abilities.permanentDelete).toEqual(false);
+  });
 });

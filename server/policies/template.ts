@@ -23,8 +23,8 @@ allow(User, "read", Template, (actor, template) =>
 
 allow(User, "listRevisions", Template, (actor, template) =>
   or(
-    and(can(actor, "read", template), !actor.isGuest),
-    and(can(actor, "update", template), actor.isGuest)
+    and(can(actor, "read", template), !actor.isViewer),
+    and(can(actor, "update", template), actor.isViewer)
   )
 );
 

@@ -61,6 +61,25 @@ describe("policies/user", () => {
       expect(abilities.readEmail).toBeTruthy();
     });
 
+    it("should allow managers to read member emails when emailDisplay is 'members'", async () => {
+      const team = await buildTeam();
+      team.setPreference(TeamPreference.EmailDisplay, EmailDisplay.Members);
+      await team.save();
+
+      const manager = await buildUser({
+        teamId: team.id,
+        role: UserRole.Manager,
+      });
+      const user = await buildUser({
+        teamId: team.id,
+      });
+
+      await manager.reload({ include: [{ association: "team" }] });
+
+      const abilities = serialize(manager, user);
+      expect(abilities.readEmail).toBeTruthy();
+    });
+
     it("should NOT allow members to read other members' emails when emailDisplay is 'none'", async () => {
       const team = await buildTeam();
       team.setPreference(TeamPreference.EmailDisplay, EmailDisplay.None);
@@ -141,7 +160,7 @@ describe("policies/user", () => {
 
       const guest = await buildUser({
         teamId: team.id,
-        role: UserRole.Guest,
+        role: UserRole.Viewer,
       });
       const user = await buildUser({
         teamId: team.id,
@@ -155,7 +174,7 @@ describe("policies/user", () => {
       const team = await buildTeam();
       const guest = await buildUser({
         teamId: team.id,
-        role: UserRole.Guest,
+        role: UserRole.Viewer,
       });
 
       const abilities = serialize(guest, guest);

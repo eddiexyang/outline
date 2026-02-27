@@ -35,7 +35,12 @@ export function UserChangeRoleDialog({
     case UserRole.Admin:
       accessNote = t("Admins can manage the workspace and access billing.");
       break;
-    case UserRole.Member:
+    case UserRole.Manager:
+      accessNote = t(
+        "Managers can manage collections, documents, and permissions."
+      );
+      break;
+    case UserRole.Editor:
       accessNote = t("Editors can create, edit, and comment on documents.");
       break;
     case UserRole.Viewer:

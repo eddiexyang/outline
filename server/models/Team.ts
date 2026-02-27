@@ -169,8 +169,8 @@ class Team extends ParanoidModel<
   @Column
   memberTeamCreate: boolean;
 
-  @Default(UserRole.Member)
-  @IsIn([[UserRole.Viewer, UserRole.Member]])
+  @Default(UserRole.Editor)
+  @IsIn([[UserRole.Viewer, UserRole.Editor]])
   @Column(DataType.STRING)
   defaultUserRole: UserRole;
 

@@ -1,9 +1,15 @@
 import { buildUser, buildWebhookSubscription } from "@server/test/factories";
 import type { UserEvent } from "@server/types";
-import DeliverWebhookTask from "../tasks/DeliverWebhookTask";
 import WebhookProcessor from "./WebhookProcessor";
 
-jest.mock("../tasks/DeliverWebhookTask");
+const mockDeliverWebhookSchedule = jest.fn();
+
+jest.mock("../tasks/DeliverWebhookTask", () => ({
+  __esModule: true,
+  default: class MockDeliverWebhookTask {
+    schedule = mockDeliverWebhookSchedule;
+  },
+}));
 const ip = "127.0.0.1";
 
 beforeEach(() => {
@@ -29,12 +35,8 @@ describe("WebhookProcessor", () => {
 
     await processor.perform(event);
 
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalled();
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalledWith({
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalled();
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalledWith({
       event,
       subscriptionId: subscription.id,
     });
@@ -57,9 +59,7 @@ describe("WebhookProcessor", () => {
 
     await processor.perform(event);
 
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalledTimes(0);
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalledTimes(0);
   });
 
   it("it schedules a delivery for the event for each subscription", async () => {
@@ -85,21 +85,13 @@ describe("WebhookProcessor", () => {
 
     await processor.perform(event);
 
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalled();
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalledTimes(2);
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalledWith({
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalled();
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalledTimes(2);
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalledWith({
       event,
       subscriptionId: subscription.id,
     });
-    expect(
-      jest.mocked(DeliverWebhookTask.prototype.schedule)
-    ).toHaveBeenCalledWith({
+    expect(mockDeliverWebhookSchedule).toHaveBeenCalledWith({
       event,
       subscriptionId: subscriptionTwo.id,
     });

@@ -25,7 +25,11 @@ const UserRoleFilter = ({ activeKey, onSelect, ...rest }: Props) => {
           label: t("Admins"),
         },
         {
-          key: UserRole.Member,
+          key: UserRole.Manager,
+          label: t("Managers"),
+        },
+        {
+          key: UserRole.Editor,
           label: t("Editors"),
         },
         {

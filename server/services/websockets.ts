@@ -203,7 +203,7 @@ async function authenticated(io: IO.Server, socket: SocketWithAuth) {
     }
     if (event.groupId) {
       const group = await Group.scope({
-        method: ["withMembership", user.id],
+        method: ["withPermissionGrants", user.id],
       }).findByPk(event.groupId);
 
       if (can(user, "read", group)) {

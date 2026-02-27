@@ -124,10 +124,10 @@ export function MembersTable({ canManage, ...rest }: Props) {
               {!user.lastActiveAt && <Badge>{t("Invited")}</Badge>}
               {user.isAdmin ? (
                 <Badge primary>{t("Admin")}</Badge>
+              ) : user.isManager ? (
+                <Badge>{t("Manager")}</Badge>
               ) : user.isViewer ? (
                 <Badge>{t("Viewer")}</Badge>
-              ) : user.isGuest ? (
-                <Badge>{t("Guest")}</Badge>
               ) : (
                 <Badge>{t("Editor")}</Badge>
               )}

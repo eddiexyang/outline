@@ -22,6 +22,7 @@ import Document from "@server/models/Document";
 import type Share from "@server/models/Share";
 import Team from "@server/models/Team";
 import User from "@server/models/User";
+import { PermissionSubjectType } from "@server/models/Permission";
 import { sequelize } from "@server/storage/database";
 import { DocumentHelper } from "./DocumentHelper";
 
@@ -320,32 +321,31 @@ export default class SearchHelper {
 
     const include = [
       {
-        association: "memberships",
+        association: "permissionGrants",
+        required: false,
+        separate: false,
         where: {
-          userId: user.id,
-        },
-        required: false,
-        separate: false,
-      },
-      {
-        association: "groupMemberships",
-        required: false,
-        separate: false,
-        include: [
-          {
-            association: "group",
-            required: true,
-            include: [
-              {
-                association: "groupUsers",
-                required: true,
-                where: {
-                  userId: user.id,
-                },
+          deletedAt: null,
+          [Op.or]: [
+            {
+              subjectType: PermissionSubjectType.User,
+              subjectId: user.id,
+            },
+            {
+              subjectType: PermissionSubjectType.Role,
+            },
+            {
+              subjectType: PermissionSubjectType.Group,
+              subjectId: {
+                [Op.in]: Sequelize.literal(`(
+                    SELECT gu."groupId"
+                    FROM "group_users" gu
+                    WHERE gu."userId" = ${sequelize.escape(user.id)}
+                  )`),
               },
-            ],
-          },
-        ],
+            },
+          ],
+        },
       },
       {
         model: User,
@@ -359,7 +359,7 @@ export default class SearchHelper {
       },
     ];
 
-    return Document.withMembershipScope(user.id, {
+    return Document.withPermissionScope(user.id, {
       includeDrafts: true,
     }).findAll({
       where,
@@ -421,32 +421,31 @@ export default class SearchHelper {
 
     const include = [
       {
-        association: "memberships",
+        association: "permissionGrants",
+        required: false,
+        separate: false,
         where: {
-          userId: user.id,
-        },
-        required: false,
-        separate: false,
-      },
-      {
-        association: "groupMemberships",
-        required: false,
-        separate: false,
-        include: [
-          {
-            association: "group",
-            required: true,
-            include: [
-              {
-                association: "groupUsers",
-                required: true,
-                where: {
-                  userId: user.id,
-                },
+          deletedAt: null,
+          [Op.or]: [
+            {
+              subjectType: PermissionSubjectType.User,
+              subjectId: user.id,
+            },
+            {
+              subjectType: PermissionSubjectType.Role,
+            },
+            {
+              subjectType: PermissionSubjectType.Group,
+              subjectId: {
+                [Op.in]: Sequelize.literal(`(
+                    SELECT gu."groupId"
+                    FROM "group_users" gu
+                    WHERE gu."userId" = ${sequelize.escape(user.id)}
+                  )`),
               },
-            ],
-          },
-        ],
+            },
+          ],
+        },
       },
     ];
 
@@ -470,7 +469,7 @@ export default class SearchHelper {
 
       // Final query to get associated document data
       const [documents, count] = await Promise.all([
-        Document.withMembershipScope(user.id, { includeDrafts: true }).findAll({
+        Document.withPermissionScope(user.id, { includeDrafts: true }).findAll({
           where: {
             teamId: user.teamId,
             id: map(results, "id"),
@@ -604,10 +603,7 @@ export default class SearchHelper {
     };
 
     if (model instanceof User) {
-      where[Op.or].push(
-        { "$memberships.id$": { [Op.ne]: null } },
-        { "$groupMemberships.id$": { [Op.ne]: null } }
-      );
+      where[Op.or].push({ "$permissionGrants.id$": { [Op.ne]: null } });
     }
 
     // Ensure we're filtering by the users accessible collections. If
@@ -680,7 +676,7 @@ export default class SearchHelper {
             },
             [Op.or]: [
               { createdById: model.id },
-              { "$memberships.id$": { [Op.ne]: null } },
+              { "$permissionGrants.id$": { [Op.ne]: null } },
             ],
           },
         ],

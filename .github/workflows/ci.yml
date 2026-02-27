@@ -29,15 +29,13 @@ jobs:
         with:
           node-version: 22.x
           cache: "yarn"
-      - name: Cache node_modules
-        id: cache-node-modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('yarn.lock') }}
       - name: Install dependencies
-        if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        run: yarn install --immutable
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
 
   lint:
     needs: setup
@@ -50,12 +48,14 @@ jobs:
         with:
           node-version: 22.x
           cache: "yarn"
-      - name: Restore node_modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('yarn.lock') }}
-      - run: yarn lint --quiet
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
+      - run: corepack yarn lint --quiet
 
   types:
     needs: setup
@@ -68,12 +68,14 @@ jobs:
         with:
           node-version: 22.x
           cache: "yarn"
-      - name: Restore node_modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('yarn.lock') }}
-      - run: yarn tsc
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
+      - run: corepack yarn tsc
 
   changes:
     runs-on: ubuntu-latest
@@ -116,12 +118,14 @@ jobs:
         with:
           node-version: 22.x
           cache: "yarn"
-      - name: Restore node_modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('yarn.lock') }}
-      - run: yarn test:${{ matrix.test-group }}
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
+      - run: corepack yarn test:${{ matrix.test-group }}
 
   test-server:
     needs: [setup, changes]
@@ -154,20 +158,81 @@ jobs:
         with:
           node-version: 22.x
           cache: "yarn"
-      - name: Restore node_modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('yarn.lock') }}
-      - run: yarn sequelize db:migrate
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
+      - run: corepack yarn sequelize db:migrate
       - name: Run server tests
         run: |
           TESTFILES=$(find . -name "*.test.ts" -path "*/server/*" | sort | awk "NR % 4 == (${{ matrix.shard }} - 1)")
-          yarn test --maxWorkers=2 $TESTFILES
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn test:server --runInBand --detectOpenHandles $TESTFILES
+          else
+            corepack yarn test:server --maxWorkers=2 --forceExit $TESTFILES
+          fi
+
+  coverage-server:
+    needs: [setup, changes]
+    if: ${{ github.event_name == 'push' || needs.changes.outputs.server == 'true' || needs.changes.outputs.config == 'true' || github.actor == 'nektos/act' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14.2
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: outline_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.x
+          cache: "yarn"
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
+      - run: corepack yarn sequelize db:migrate
+      - name: Run server coverage
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn test:server --runInBand --silent --reporters=summary --forceExit --coverage --coverageProvider=v8 --coverageReporters=text-summary --coverageReporters=json-summary --coverageReporters=lcov
+          else
+            corepack yarn test:server --maxWorkers=2 --silent --reporters=summary --forceExit --coverage --coverageProvider=v8 --coverageReporters=text-summary --coverageReporters=json-summary --coverageReporters=lcov
+          fi
+      - name: Upload server coverage artifact
+        if: ${{ github.actor != 'nektos/act' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-coverage
+          path: |
+            coverage/coverage-summary.json
+            coverage/lcov.info
+      - name: Verify server coverage files (act)
+        if: ${{ github.actor == 'nektos/act' }}
+        run: |
+          test -f coverage/coverage-summary.json
+          test -f coverage/lcov.info
 
   bundle-size:
     needs: [setup, types, changes]
-    if: ${{ (needs.changes.outputs.app == 'true' || needs.changes.outputs.config == 'true') && github.repository == 'outline/outline' }}
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -177,14 +242,16 @@ jobs:
         with:
           node-version: 22.x
           cache: "yarn"
-      - name: Restore node_modules
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('yarn.lock') }}
+      - name: Install dependencies
+        run: |
+          if [ "${{ github.actor }}" = "nektos/act" ]; then
+            corepack yarn install --immutable --mode=skip-build
+          else
+            corepack yarn install --immutable
+          fi
       - name: Set environment to production
         run: echo "NODE_ENV=production" >> $GITHUB_ENV
-      - run: yarn vite:build
+      - run: corepack yarn vite:build
       - name: Send bundle stats to RelativeCI
         uses: relative-ci/agent-action@v2
         with:

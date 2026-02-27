@@ -22,7 +22,6 @@ import type {
   Revision,
   Team,
   User,
-  UserMembership,
   UserPasskey,
   WebhookSubscription,
   Pin,
@@ -36,7 +35,7 @@ import type {
   View,
   Notification,
   Share,
-  GroupMembership,
+  Permission,
   Import,
   OAuthClient,
 } from "./models";
@@ -181,7 +180,7 @@ export type UserEvent = BaseEvent<User> &
       }
   );
 
-export type UserMembershipEvent = BaseEvent<UserMembership> & {
+export type UserMembershipEvent = BaseEvent<Permission> & {
   name: "userMemberships.update";
   modelId: string;
   userId: string;
@@ -279,7 +278,7 @@ export type FileOperationEvent = BaseEvent<FileOperation> & {
   data: Partial<FileOperation>;
 };
 
-export type CollectionUserEvent = BaseEvent<UserMembership> & {
+export type CollectionUserEvent = BaseEvent<Permission> & {
   name: "collections.add_user" | "collections.remove_user";
   userId: string;
   modelId: string;
@@ -289,14 +288,14 @@ export type CollectionUserEvent = BaseEvent<UserMembership> & {
   };
 };
 
-export type CollectionGroupEvent = BaseEvent<GroupMembership> & {
+export type CollectionGroupEvent = BaseEvent<Permission> & {
   name: "collections.add_group" | "collections.remove_group";
   collectionId: string;
   modelId: string;
   data: { membershipId: string };
 };
 
-export type DocumentUserEvent = BaseEvent<UserMembership> & {
+export type DocumentUserEvent = BaseEvent<Permission> & {
   name: "documents.add_user" | "documents.remove_user";
   userId: string;
   modelId: string;
@@ -306,7 +305,7 @@ export type DocumentUserEvent = BaseEvent<UserMembership> & {
   };
 };
 
-export type DocumentGroupEvent = BaseEvent<GroupMembership> & {
+export type DocumentGroupEvent = BaseEvent<Permission> & {
   name: "documents.add_group" | "documents.remove_group";
   documentId: string;
   modelId: string;
@@ -328,7 +327,7 @@ export type CollectionEvent = BaseEvent<Collection> & {
   collectionId: string;
 };
 
-export type GroupUserEvent = BaseEvent<UserMembership> & {
+export type GroupUserEvent = BaseEvent<Permission> & {
   name: "groups.add_user" | "groups.remove_user";
   userId: string;
   modelId: string;

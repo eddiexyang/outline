@@ -18,6 +18,7 @@ import Text from "~/components/Text";
 import { inviteUser } from "~/actions/definitions/users";
 import env from "~/env";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
+import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useQuery from "~/hooks/useQuery";
 import useStores from "~/hooks/useStores";
@@ -28,13 +29,16 @@ import { StickyFilters } from "./components/StickyFilters";
 import UserRoleFilter from "./components/UserRoleFilter";
 import UserStatusFilter from "./components/UserStatusFilter";
 import { HStack } from "~/components/primitives/HStack";
+import CollectionPermissionsAudit from "./components/CollectionPermissionsAudit";
 
 function Members() {
   const appName = env.APP_NAME;
   const location = useLocation();
   const history = useHistory();
   const team = useCurrentTeam();
+  const currentUser = useCurrentUser();
   const { users } = useStores();
+  const { dialogs } = useStores();
   const { t } = useTranslation();
   const params = useQuery();
   const can = usePolicy(team);
@@ -121,6 +125,22 @@ function Members() {
       icon={<UserIcon />}
       actions={
         <>
+          {currentUser.isAdmin && (
+            <Action>
+              <Button
+                type="button"
+                neutral
+                onClick={() =>
+                  dialogs.openModal({
+                    title: t("Collection permissions"),
+                    content: <CollectionPermissionsAudit />,
+                  })
+                }
+              >
+                {t("Collection permissions")}
+              </Button>
+            </Action>
+          )}
           {can.inviteUser && (
             <Action>
               <Button

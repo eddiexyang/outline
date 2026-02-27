@@ -10,6 +10,7 @@ import { Collection, Team, View } from "@server/models";
 import AuthenticationHelper from "@server/models/helpers/AuthenticationHelper";
 import type { AppState, AppContext, APIContext } from "@server/types";
 import { verifyCSRFToken } from "@server/middlewares/csrf";
+import { getJWTPayload } from "@server/utils/jwt";
 
 const app = new Koa<AppState, AppContext>();
 const router = new Router();
@@ -32,6 +33,12 @@ void (async () => {
 
 router.get("/redirect", authMiddleware(), async (ctx: APIContext) => {
   const { user, service } = ctx.state.auth;
+  const payload = getJWTPayload(ctx.state.auth.token);
+
+  if (payload.type !== "transfer") {
+    throw AuthenticationError("Cannot extend token");
+  }
+
   const jwtToken = user.getJwtToken(undefined, service);
 
   if (jwtToken === ctx.state.auth.token) {

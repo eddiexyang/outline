@@ -61,7 +61,9 @@ export function createQueue(
   }
 
   ShutdownHelper.add(name, ShutdownOrder.normal, async () => {
-    await queue.close();
+    if ("close" in queue && typeof queue.close === "function") {
+      await queue.close();
+    }
   });
 
   return queue;

@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { AttachmentPreset, CollectionPermission } from "@shared/types";
-import { UserMembership } from "@server/models";
+import { Permission } from "@server/models";
 import Attachment from "@server/models/Attachment";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import {
   buildUser,
   buildAdmin,
@@ -15,6 +21,12 @@ import { getTestServer } from "@server/test/support";
 jest.mock("@server/storage/files");
 
 const server = getTestServer();
+const toCollectionLevel = (permission: CollectionPermission) =>
+  permission === CollectionPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === CollectionPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
 
 describe("#attachments.list", () => {
   it("should return attachments for user", async () => {
@@ -241,11 +253,16 @@ describe("#attachments.create", () => {
         collectionId: collection.id,
       });
 
-      await UserMembership.create({
-        createdById: user.id,
-        collectionId: collection.id,
-        userId: user.id,
-        permission: CollectionPermission.ReadWrite,
+      await Permission.create({
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: user.id,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collection.id,
+        permission: toCollectionLevel(CollectionPermission.Edit),
+        inheritMode: PermissionInheritMode.Self,
+        grantedById: user.id,
       });
 
       const res = await server.post("/api/attachments.create", {

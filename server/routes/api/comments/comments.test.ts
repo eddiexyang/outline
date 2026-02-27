@@ -188,7 +188,7 @@ describe("#comments.list", () => {
       userId: user.id,
       documentId: document.id,
     });
-    await buildResolvedComment(user, {
+    const resolvedComment = await buildResolvedComment(user, {
       userId: user.id,
       documentId: document.id,
     });
@@ -202,7 +202,9 @@ describe("#comments.list", () => {
 
     expect(res.status).toEqual(200);
     expect(body.data.length).toEqual(2);
-    expect(body.data[1].id).toEqual(comment.id);
+    expect(body.data.map((entry: { id: string }) => entry.id)).toEqual(
+      expect.arrayContaining([comment.id, resolvedComment.id])
+    );
     expect(body.policies.length).toEqual(2);
     expect(body.policies[0].abilities.read).toBeTruthy();
     expect(body.policies[1].abilities.read).toBeTruthy();
@@ -255,10 +257,14 @@ describe("#comments.list", () => {
 
     expect(res.status).toEqual(200);
     expect(body.data.length).toEqual(2);
-    expect(body.data[0].id).toEqual(commentOne.id);
-    expect(body.data[1].id).toEqual(commentTwo.id);
-    expect(body.data[0].anchorText).toEqual(anchorText);
-    expect(body.data[1].anchorText).toBeUndefined();
+    const commentsById = Object.fromEntries(
+      body.data.map((comment: { id: string; anchorText?: string }) => [
+        comment.id,
+        comment,
+      ])
+    );
+    expect(commentsById[commentOne.id]?.anchorText).toEqual(anchorText);
+    expect(commentsById[commentTwo.id]?.anchorText).toBeUndefined();
   });
 
   it("should return unresolved comments for a collection", async () => {

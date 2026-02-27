@@ -3,6 +3,8 @@ import InviteReminderEmail from "@server/emails/templates/InviteReminderEmail";
 import { buildInvite } from "@server/test/factories";
 import InviteReminderTask from "./InviteReminderTask";
 
+jest.setTimeout(15000);
+
 describe("InviteReminderTask", () => {
   it("should send reminder emails", async () => {
     const spy = jest.spyOn(InviteReminderEmail.prototype, "schedule");

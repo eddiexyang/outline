@@ -2,10 +2,7 @@ import { randomUUID } from "node:crypto";
 import { randomString } from "@shared/random";
 import slugify from "@shared/utils/slugify";
 import {
-  buildUser,
-  buildGroup,
   buildCollection,
-  buildTeam,
   buildDocument,
 } from "@server/test/factories";
 import Collection from "./Collection";
@@ -389,77 +386,6 @@ describe("#removeDocument", () => {
       },
     });
     expect(collectionDocuments.count).toBe(1);
-  });
-});
-
-describe("#membershipUserIds", () => {
-  it("should return collection and group memberships", async () => {
-    const team = await buildTeam();
-    const teamId = team.id;
-    // Make 6 users
-    const users = await Promise.all(
-      Array(6)
-        .fill(undefined)
-        .map(() =>
-          buildUser({
-            teamId,
-          })
-        )
-    );
-    const collection = await buildCollection({
-      userId: users[0].id,
-      permission: null,
-      teamId,
-    });
-    const group1 = await buildGroup({
-      teamId,
-    });
-    const group2 = await buildGroup({
-      teamId,
-    });
-    const createdById = users[0].id;
-    await group1.$add("user", users[0], {
-      through: {
-        createdById,
-      },
-    });
-    await group1.$add("user", users[1], {
-      through: {
-        createdById,
-      },
-    });
-    await group2.$add("user", users[2], {
-      through: {
-        createdById,
-      },
-    });
-    await group2.$add("user", users[3], {
-      through: {
-        createdById,
-      },
-    });
-    await collection.$add("user", users[4], {
-      through: {
-        createdById,
-      },
-    });
-    await collection.$add("user", users[5], {
-      through: {
-        createdById,
-      },
-    });
-    await collection.$add("group", group1, {
-      through: {
-        createdById,
-      },
-    });
-    await collection.$add("group", group2, {
-      through: {
-        createdById,
-      },
-    });
-    const membershipUserIds = await Collection.membershipUserIds(collection.id);
-    expect(membershipUserIds.length).toBe(6);
   });
 });
 

@@ -285,11 +285,11 @@ function SharePopover({ collection, visible, onRequestClose }: Props) {
         },
         {
           label: t("Can edit"),
-          value: CollectionPermission.ReadWrite,
+          value: CollectionPermission.Edit,
         },
         {
           label: t("Manage"),
-          value: CollectionPermission.Admin,
+          value: CollectionPermission.Manage,
         },
       ] as Permission[],
     [t]

@@ -2,6 +2,7 @@ import { observer } from "mobx-react";
 import { GlobeIcon } from "outline-icons";
 import { Suspense, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type Document from "~/models/Document";
 import Button from "~/components/Button";
 import {
@@ -9,7 +10,9 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "~/components/primitives/Popover";
+import useCurrentTeam from "~/hooks/useCurrentTeam";
 import useMobile from "~/hooks/useMobile";
+import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import lazyWithRetry from "~/utils/lazyWithRetry";
 
@@ -26,6 +29,8 @@ function ShareButton({ document }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const { shares } = useStores();
+  const team = useCurrentTeam();
+  const can = usePolicy(document);
   const isMobile = useMobile();
   const share = shares.getByDocumentId(document.id);
   const sharedParent = shares.getByDocumentParents(document);
@@ -36,17 +41,36 @@ function ShareButton({ document }: Props) {
   }, []);
 
   const handleMouseEnter = useCallback(() => {
+    if (!can.share) {
+      return;
+    }
     void document.share();
-  }, [document]);
+  }, [can.share, document]);
+
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (nextOpen && !can.share) {
+        toast.error(t("Permission denied. Contact your administrator"));
+        setOpen(false);
+        return;
+      }
+
+      setOpen(nextOpen);
+    },
+    [can.share, t]
+  );
 
   if (isMobile) {
+    return null;
+  }
+  if (!team.sharing) {
     return null;
   }
 
   const icon = document.isPubliclyShared ? <GlobeIcon /> : undefined;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger>
         <Button icon={icon} neutral onMouseEnter={handleMouseEnter}>
           {t("Share")} {domain && <>&middot; {domain}</>}

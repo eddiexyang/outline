@@ -1,6 +1,9 @@
 import * as React from "react";
-import { DocumentPermission } from "@shared/types";
-import { Document, GroupMembership, UserMembership } from "@server/models";
+import { Document, Permission } from "@server/models";
+import {
+  PermissionLevel,
+  PermissionResourceType,
+} from "@server/models/Permission";
 import type { EmailProps } from "./BaseEmail";
 import BaseEmail, { EmailMessageCategory } from "./BaseEmail";
 import Body from "./components/Body";
@@ -19,7 +22,7 @@ type InputProps = EmailProps & {
 
 type BeforeSend = {
   document: Document;
-  membership: UserMembership | GroupMembership;
+  permissionGrant: Permission;
 };
 
 type Props = InputProps & BeforeSend;
@@ -45,15 +48,19 @@ export default class DocumentSharedEmail extends BaseEmail<
       return false;
     }
 
-    const membership =
-      (await UserMembership.findByPk(membershipId)) ??
-      (await GroupMembership.findByPk(membershipId));
+    const permissionGrant = await Permission.findOne({
+      where: {
+        id: membershipId,
+        resourceType: PermissionResourceType.Document,
+        deletedAt: null,
+      },
+    });
 
-    if (!membership) {
+    if (!permissionGrant) {
       return false;
     }
 
-    return { document, membership };
+    return { document, permissionGrant };
   }
 
   protected subject({ actorName, document }: Props) {
@@ -77,11 +84,11 @@ View Document: ${teamUrl}${document.path}
   }
 
   protected render(props: Props) {
-    const { document, membership, actorName, teamUrl } = props;
+    const { document, permissionGrant, actorName, teamUrl } = props;
     const documentUrl = `${teamUrl}${document.path}?ref=notification-email`;
 
     const permission =
-      membership.permission === DocumentPermission.Read ? "view" : "edit";
+      permissionGrant.permission === PermissionLevel.Read ? "view" : "edit";
 
     return (
       <EmailTemplate

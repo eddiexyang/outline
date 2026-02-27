@@ -20,7 +20,7 @@ allow(User, "listGroups", Team, (actor, team) =>
   and(
     //
     isTeamModel(actor, team),
-    !actor.isGuest
+    !actor.isViewer
   )
 );
 
@@ -28,7 +28,7 @@ allow(User, "read", Group, (actor, group) =>
   and(
     //
     isTeamModel(actor, group),
-    !actor.isGuest
+    !actor.isViewer
   )
 );
 

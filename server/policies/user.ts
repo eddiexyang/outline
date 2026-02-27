@@ -16,7 +16,7 @@ allow(User, "listUsers", Team, (actor, team) =>
   and(
     //
     isTeamModel(actor, team),
-    !actor.isGuest
+    !actor.isViewer
   )
 );
 
@@ -24,7 +24,6 @@ allow(User, "inviteUser", Team, (actor, team) =>
   and(
     isTeamModel(actor, team),
     isTeamMutable(actor),
-    !actor.isGuest,
     !actor.isViewer,
     actor.isAdmin || !!team?.getPreference(TeamPreference.MembersCanInvite)
   )

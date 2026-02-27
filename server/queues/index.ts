@@ -52,3 +52,25 @@ export const taskQueue = () => {
   }
   return cachedTaskQueue;
 };
+
+export const closeAllQueuesForTest = async () => {
+  const queues = [
+    cachedGlobalEventQueue,
+    cachedProcessorEventQueue,
+    cachedWebsocketQueue,
+    cachedTaskQueue,
+  ].filter(Boolean) as Array<ReturnType<typeof createQueue> | undefined>;
+
+  await Promise.allSettled(
+    queues.map(async (queue) => {
+      if (queue && "close" in queue && typeof queue.close === "function") {
+        await queue.close();
+      }
+    })
+  );
+
+  cachedGlobalEventQueue = undefined;
+  cachedProcessorEventQueue = undefined;
+  cachedWebsocketQueue = undefined;
+  cachedTaskQueue = undefined;
+};

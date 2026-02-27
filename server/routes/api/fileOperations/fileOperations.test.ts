@@ -4,6 +4,7 @@ import {
   buildAdmin,
   buildCollection,
   buildFileOperation,
+  buildManager,
   buildTeam,
   buildUser,
 } from "@server/test/factories";
@@ -37,7 +38,31 @@ describe("#fileOperations.info", () => {
     expect(body.data.state).toBe(exportData.state);
   });
 
-  it("should require user to be an admin", async () => {
+  it("should return fileOperation for manager", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({
+      teamId: team.id,
+    });
+    const manager = await buildManager({
+      teamId: team.id,
+    });
+    const exportData = await buildFileOperation({
+      type: FileOperationType.Export,
+      teamId: team.id,
+      userId: admin.id,
+    });
+    const res = await server.post("/api/fileOperations.info", {
+      body: {
+        id: exportData.id,
+        token: manager.getJwtToken(),
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.id).toBe(exportData.id);
+  });
+
+  it("should require user to be a manager", async () => {
     const team = await buildTeam();
     const admin = await buildAdmin({
       teamId: team.id,
@@ -206,7 +231,7 @@ describe("#fileOperations.list", () => {
     expect(data.user.id).toBe(admin.id);
   });
 
-  it("should require admin", async () => {
+  it("should require manager", async () => {
     const user = await buildUser();
     const res = await server.post("/api/fileOperations.list", {
       body: {
@@ -215,6 +240,30 @@ describe("#fileOperations.list", () => {
       },
     });
     expect(res.status).toEqual(403);
+  });
+
+  it("should return fileOperations list for manager", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({
+      teamId: team.id,
+    });
+    const manager = await buildManager({
+      teamId: team.id,
+    });
+    const exportData = await buildFileOperation({
+      type: FileOperationType.Export,
+      teamId: team.id,
+      userId: admin.id,
+    });
+    const res = await server.post("/api/fileOperations.list", {
+      body: {
+        token: manager.getJwtToken(),
+        type: FileOperationType.Export,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data[0].id).toBe(exportData.id);
   });
 });
 
@@ -257,6 +306,30 @@ describe("#fileOperations.redirect", () => {
       },
     });
     expect(res.status).toEqual(403);
+  });
+
+  it("should allow manager access to redirects", async () => {
+    const team = await buildTeam();
+    const admin = await buildAdmin({
+      teamId: team.id,
+    });
+    const manager = await buildManager({
+      teamId: team.id,
+    });
+    const exportData = await buildFileOperation({
+      type: FileOperationType.Export,
+      teamId: team.id,
+      userId: admin.id,
+    });
+    const res = await server.post("/api/fileOperations.redirect", {
+      body: {
+        token: manager.getJwtToken(),
+        id: exportData.id,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(400);
+    expect(body.message).toEqual("export is not complete yet");
   });
 });
 
@@ -308,6 +381,25 @@ describe("#fileOperations.delete", () => {
     const res = await server.post("/api/fileOperations.delete", {
       body: {
         token: admin.getJwtToken(),
+        id: exportData.id,
+      },
+    });
+    expect(res.status).toEqual(403);
+  });
+
+  it("should require admin role", async () => {
+    const team = await buildTeam();
+    const manager = await buildManager({ teamId: team.id });
+    const admin = await buildAdmin({ teamId: team.id });
+    const exportData = await buildFileOperation({
+      type: FileOperationType.Export,
+      teamId: team.id,
+      userId: admin.id,
+      state: FileOperationState.Complete,
+    });
+    const res = await server.post("/api/fileOperations.delete", {
+      body: {
+        token: manager.getJwtToken(),
         id: exportData.id,
       },
     });

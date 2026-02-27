@@ -17,7 +17,7 @@ const router = new Router();
 
 router.post(
   "fileOperations.info",
-  auth({ role: UserRole.Admin }),
+  auth({ role: UserRole.Manager }),
   validate(T.FileOperationsInfoSchema),
   async (ctx: APIContext<T.FileOperationsInfoReq>) => {
     const { id } = ctx.input.body;
@@ -37,7 +37,7 @@ router.post(
 
 router.post(
   "fileOperations.list",
-  auth({ role: UserRole.Admin }),
+  auth({ role: UserRole.Manager }),
   pagination(),
   validate(T.FileOperationsListSchema),
   async (ctx: APIContext<T.FileOperationsListReq>) => {
@@ -49,7 +49,7 @@ router.post(
       type,
     };
     const team = await Team.findByPk(user.teamId);
-    authorize(user, "update", team);
+    authorize(user, "createFileOperation", team);
 
     const [fileOperations, total] = await Promise.all([
       FileOperation.findAll({
@@ -92,13 +92,13 @@ const handleFileOperationsRedirect = async (
 
 router.get(
   "fileOperations.redirect",
-  auth({ role: UserRole.Admin }),
+  auth({ role: UserRole.Manager }),
   validate(T.FileOperationsRedirectSchema),
   handleFileOperationsRedirect
 );
 router.post(
   "fileOperations.redirect",
-  auth({ role: UserRole.Admin }),
+  auth({ role: UserRole.Manager }),
   validate(T.FileOperationsRedirectSchema),
   handleFileOperationsRedirect
 );

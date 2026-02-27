@@ -20,7 +20,7 @@ allow(User, ["update", "delete"], Integration, (actor, integration) =>
   and(
     isTeamModel(actor, integration),
     isTeamMutable(actor),
-    !actor.isGuest,
+    !actor.isViewer,
     !actor.isViewer,
     or(
       actor.isAdmin,

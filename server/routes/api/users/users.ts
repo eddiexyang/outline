@@ -70,8 +70,13 @@ router.post(
         break;
       }
 
+      case "managers": {
+        where = { ...where, role: UserRole.Manager };
+        break;
+      }
+
       case "members": {
-        where = { ...where, role: UserRole.Member };
+        where = { ...where, role: UserRole.Editor };
         break;
       }
 

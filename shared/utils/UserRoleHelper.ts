@@ -15,12 +15,12 @@ export class UserRoleHelper {
    */
   static displayName(role: UserRole, t: TFunction): string {
     switch (role) {
-      case UserRole.Guest:
-        return t("Guest");
       case UserRole.Viewer:
         return t("Viewer");
-      case UserRole.Member:
+      case UserRole.Editor:
         return t("Editor");
+      case UserRole.Manager:
+        return t("Manager");
       case UserRole.Admin:
         return t("Admin");
     }
@@ -74,9 +74,9 @@ export class UserRoleHelper {
    * List of all roles in order from lowest to highest.
    */
   private static roles = [
-    UserRole.Guest,
     UserRole.Viewer,
-    UserRole.Member,
+    UserRole.Editor,
+    UserRole.Manager,
     UserRole.Admin,
   ];
 }

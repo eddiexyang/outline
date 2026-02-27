@@ -109,7 +109,7 @@ export function useUserMenuActions(targetUser: User | null) {
   const roleChangeActions = React.useMemo(
     () =>
       targetUser
-        ? [UserRole.Admin, UserRole.Member, UserRole.Viewer].map((role) =>
+        ? [UserRole.Admin, UserRole.Manager, UserRole.Editor, UserRole.Viewer].map((role) =>
             updateUserRoleActionFactory(targetUser, role)
           )
         : [],

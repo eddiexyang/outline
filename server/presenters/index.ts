@@ -8,11 +8,9 @@ import presentDocument from "./document";
 import presentEvent from "./event";
 import presentFileOperation from "./fileOperation";
 import presentGroup from "./group";
-import presentGroupMembership from "./groupMembership";
 import presentGroupUser from "./groupUser";
 import presentImport from "./import";
 import presentIntegration from "./integration";
-import presentMembership from "./membership";
 import presentOAuthClient, { presentPublishedOAuthClient } from "./oauthClient";
 import presentPin from "./pin";
 import presentPolicies from "./policy";
@@ -43,10 +41,8 @@ export {
   presentFileOperation,
   presentGroup,
   presentGroupUser,
-  presentGroupMembership,
   presentImport,
   presentIntegration,
-  presentMembership,
   presentOAuthClient,
   presentPublishedOAuthClient,
   presentPublicTeam,

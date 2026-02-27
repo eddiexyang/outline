@@ -14,7 +14,6 @@ allow(User, ["read", "readTemplate"], Team, isTeamModel);
 allow(User, "share", Team, (actor, team) =>
   and(
     isTeamModel(actor, team),
-    !actor.isGuest,
     !actor.isViewer,
     !!team?.sharing
   )
@@ -24,7 +23,6 @@ allow(User, "createTeam", Team, (actor, team) =>
   and(
     //
     isCloudHosted(),
-    !actor.isGuest,
     !actor.isViewer,
     or(actor.isAdmin, !!team?.memberTeamCreate)
   )
@@ -43,7 +41,6 @@ allow(User, ["delete", "audit"], Team, (actor, team) =>
 allow(User, "createTemplate", Team, (actor, team) =>
   and(
     //
-    !actor.isGuest,
     !actor.isViewer,
     isTeamModel(actor, team),
     isTeamMutable(actor)

@@ -2,11 +2,12 @@ import {
   ApiKey,
   GroupUser,
   OAuthAuthentication,
+  Permission,
   Star,
   Subscription,
   UserAuthentication,
-  UserMembership,
 } from "@server/models";
+import { PermissionSubjectType } from "@server/models/Permission";
 import { sequelize } from "@server/storage/database";
 import type { Event as TEvent, UserEvent } from "@server/types";
 import BaseProcessor from "./BaseProcessor";
@@ -29,9 +30,10 @@ export default class UserDeletedProcessor extends BaseProcessor {
         },
         transaction,
       });
-      await UserMembership.destroy({
+      await Permission.destroy({
         where: {
-          userId: event.userId,
+          subjectType: PermissionSubjectType.User,
+          subjectId: event.userId,
         },
         transaction,
       });

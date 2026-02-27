@@ -27,7 +27,9 @@ export const TeamsUpdateSchema = BaseSchema.extend({
     /** The default landing collection for the team */
     defaultCollectionId: z.uuid().nullish(),
     /** The default user role */
-    defaultUserRole: z.enum(UserRole).optional(),
+    defaultUserRole: z
+      .enum([UserRole.Viewer, UserRole.Editor])
+      .optional(),
     /** Whether new users must be invited to join the team */
     inviteRequired: z.boolean().optional(),
     /** Domains allowed to sign-in with SSO */

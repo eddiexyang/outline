@@ -105,10 +105,17 @@ class User extends ParanoidModel implements Searchable {
   }
 
   /**
-   * Whether the user is a member (editor).
+   * Whether the user is a manager.
    */
-  get isMember(): boolean {
-    return this.role === UserRole.Member;
+  get isManager(): boolean {
+    return this.role === UserRole.Manager;
+  }
+
+  /**
+   * Whether the user is an editor.
+   */
+  get isEditor(): boolean {
+    return this.role === UserRole.Editor;
   }
 
   /**
@@ -116,13 +123,6 @@ class User extends ParanoidModel implements Searchable {
    */
   get isViewer(): boolean {
     return this.role === UserRole.Viewer;
-  }
-
-  /**
-   * Whether the user is a guest.
-   */
-  get isGuest(): boolean {
-    return this.role === UserRole.Guest;
   }
 
   /**

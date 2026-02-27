@@ -188,7 +188,7 @@ export async function buildGuestUser(overrides: Partial<User> = {}) {
     name: faker.person.fullName(),
     createdAt: new Date("2018-01-01T00:00:00.000Z"),
     lastActiveAt: new Date("2018-01-01T00:00:00.000Z"),
-    role: UserRole.Guest,
+    role: UserRole.Viewer,
     ...overrides,
   });
 }
@@ -242,6 +242,10 @@ export async function buildAdmin(overrides: Partial<User> = {}) {
 
 export async function buildViewer(overrides: Partial<User> = {}) {
   return buildUser({ ...overrides, role: UserRole.Viewer });
+}
+
+export async function buildManager(overrides: Partial<User> = {}) {
+  return buildUser({ ...overrides, role: UserRole.Manager });
 }
 
 export async function buildInvite(overrides: Partial<User> = {}) {
@@ -311,7 +315,7 @@ export async function buildCollection(
   }
 
   if (overrides.permission === undefined) {
-    overrides.permission = CollectionPermission.ReadWrite;
+    overrides.permission = CollectionPermission.Edit;
   }
 
   return Collection.scope("withDocumentStructure").create({

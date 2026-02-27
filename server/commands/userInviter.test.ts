@@ -12,7 +12,7 @@ describe("userInviter", () => {
       userInviter(ctx, {
         invites: [
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email: faker.internet.email(),
             name: "Test",
           },
@@ -28,7 +28,7 @@ describe("userInviter", () => {
       userInviter(ctx, {
         invites: [
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email: " ",
             name: "Test",
           },
@@ -53,7 +53,7 @@ describe("userInviter", () => {
         userInviter(ctx, {
           invites: [
             {
-              role: UserRole.Member,
+              role: UserRole.Editor,
               email: "test@example.com",
               name: "Test",
             },
@@ -78,7 +78,7 @@ describe("userInviter", () => {
       userInviter(ctx, {
         invites: [
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email: `test@${allowedDomain}`,
             name: "Test User",
           },
@@ -96,7 +96,7 @@ describe("userInviter", () => {
       userInviter(ctx, {
         invites: [
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email: "notanemail",
             name: "Test",
           },
@@ -112,12 +112,12 @@ describe("userInviter", () => {
       userInviter(ctx, {
         invites: [
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email: "the@same.com",
             name: "Test",
           },
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email: "the@SAME.COM",
             name: "Test",
           },
@@ -134,7 +134,7 @@ describe("userInviter", () => {
       userInviter(ctx, {
         invites: [
           {
-            role: UserRole.Member,
+            role: UserRole.Editor,
             email,
             name: user.name,
           },

@@ -59,6 +59,11 @@ export default class Collection extends ParanoidModel {
   @observable
   index: string;
 
+  /** The user ID that owns this collection. */
+  @Field
+  @observable
+  ownerId: string;
+
   /** The sort field and direction for documents in the collection. */
   @Field
   @observable

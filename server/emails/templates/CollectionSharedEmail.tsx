@@ -1,6 +1,10 @@
 import * as React from "react";
-import { CollectionPermission } from "@shared/types";
-import { Collection, UserMembership } from "@server/models";
+import { Collection, Permission } from "@server/models";
+import {
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import type { EmailProps } from "./BaseEmail";
 import BaseEmail, { EmailMessageCategory } from "./BaseEmail";
 import Body from "./components/Body";
@@ -18,7 +22,7 @@ type InputProps = EmailProps & {
 
 type BeforeSend = {
   collection: Collection;
-  membership: UserMembership;
+  permissionGrant: Permission;
 };
 
 type Props = InputProps & BeforeSend;
@@ -40,17 +44,20 @@ export default class CollectionSharedEmail extends BaseEmail<
       return false;
     }
 
-    const membership = await UserMembership.findOne({
+    const permissionGrant = await Permission.findOne({
       where: {
-        collectionId,
-        userId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: userId,
+        resourceType: PermissionResourceType.Collection,
+        resourceId: collectionId,
+        deletedAt: null,
       },
     });
-    if (!membership) {
+    if (!permissionGrant) {
       return false;
     }
 
-    return { collection, membership };
+    return { collection, permissionGrant };
   }
 
   protected subject({ actorName, collection }: Props) {
@@ -74,13 +81,13 @@ View Document: ${teamUrl}${collection.path}
   }
 
   protected render(props: Props) {
-    const { collection, membership, actorName, teamUrl } = props;
+    const { collection, permissionGrant, actorName, teamUrl } = props;
     const collectionUrl = `${teamUrl}${collection.path}?ref=notification-email`;
 
     const permission =
-      membership.permission === CollectionPermission.ReadWrite
+      permissionGrant.permission === PermissionLevel.Edit
         ? "view and edit"
-        : membership.permission === CollectionPermission.Admin
+        : permissionGrant.permission === PermissionLevel.Manage
           ? "manage"
           : "view";
 

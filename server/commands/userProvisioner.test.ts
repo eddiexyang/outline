@@ -193,7 +193,7 @@ describe("userProvisioner", () => {
     expect(authentication?.scopes.length).toEqual(1);
     expect(authentication?.scopes[0]).toEqual("read");
     expect(user.email).toEqual("test@example.com");
-    expect(user.role).toEqual(UserRole.Member);
+    expect(user.role).toEqual(UserRole.Editor);
     expect(isNewUser).toEqual(true);
   });
 

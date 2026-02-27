@@ -29,7 +29,7 @@ export const InputSelectPermission = React.forwardRef<HTMLButtonElement, Props>(
         {
           type: "item",
           label: t("Can edit"),
-          value: CollectionPermission.ReadWrite,
+          value: CollectionPermission.Edit,
         },
         {
           type: "separator",

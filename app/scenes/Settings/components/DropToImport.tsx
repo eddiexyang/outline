@@ -31,7 +31,7 @@ function DropToImport({ disabled, onSubmit, children, format }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [isImporting, setImporting] = useState(false);
   const [permission, setPermission] = useState<CollectionPermission | null>(
-    CollectionPermission.ReadWrite
+    CollectionPermission.Edit
   );
 
   const handleFiles = (files: File[]) => {

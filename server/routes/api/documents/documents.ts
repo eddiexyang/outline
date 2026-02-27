@@ -1,5 +1,4 @@
 import path from "node:path";
-import fractionalIndex from "fractional-index";
 import fs from "fs-extra";
 import invariant from "invariant";
 import contentDisposition from "content-disposition";
@@ -16,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import type { DirectionFilter, SortFilter } from "@shared/types";
 import { type NavigationNode } from "@shared/types";
 import {
+  DocumentPermission,
   FileOperationFormat,
   FileOperationState,
   FileOperationType,
@@ -55,12 +55,17 @@ import {
   Template,
   User,
   View,
-  UserMembership,
   Group,
   GroupUser,
-  GroupMembership,
+  Permission,
   FileOperation,
 } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import AttachmentHelper from "@server/models/helpers/AttachmentHelper";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import { ProsemirrorHelper } from "@server/models/helpers/ProsemirrorHelper";
@@ -71,9 +76,7 @@ import {
   presentDocument,
   presentPolicies,
   presentTemplate,
-  presentMembership,
   presentUser,
-  presentGroupMembership,
   presentGroup,
   presentFileOperation,
 } from "@server/presenters";
@@ -93,8 +96,23 @@ import {
   loadPublicShare,
   getAllIdsInSharedTree,
 } from "@server/commands/shareLoader";
+import PermissionResolver from "@server/services/permissions/PermissionResolver";
 
 const router = new Router();
+
+const documentPermissionToLevel = (permission: DocumentPermission) =>
+  permission === DocumentPermission.Manage
+    ? PermissionLevel.Manage
+    : permission === DocumentPermission.Edit
+      ? PermissionLevel.Edit
+      : PermissionLevel.Read;
+
+const levelToDocumentPermission = (level: PermissionLevel) =>
+  level === PermissionLevel.Manage
+    ? DocumentPermission.Manage
+    : level === PermissionLevel.Edit
+      ? DocumentPermission.Edit
+      : DocumentPermission.Read;
 
 router.post(
   "documents.list",
@@ -170,36 +188,38 @@ router.post(
     }
 
     if (parentDocumentId) {
-      const [groupMembership, membership] = await Promise.all([
-        GroupMembership.findOne({
-          where: {
-            documentId: parentDocumentId,
-          },
-          include: [
+      const groupIds = await user.groupIds();
+      const directDocumentPermission = await Permission.findOne({
+        attributes: ["id"],
+        where: {
+          teamId: user.teamId,
+          deletedAt: null,
+          resourceType: PermissionResourceType.Document,
+          resourceId: parentDocumentId,
+          [Op.or]: [
             {
-              model: Group,
-              required: true,
-              include: [
-                {
-                  model: GroupUser,
-                  required: true,
-                  where: {
-                    userId: user.id,
-                  },
-                },
-              ],
+              subjectType: PermissionSubjectType.User,
+              subjectId: user.id,
             },
+            {
+              subjectType: PermissionSubjectType.Role,
+              subjectRole: user.role,
+            },
+            ...(groupIds.length
+              ? [
+                  {
+                    subjectType: PermissionSubjectType.Group,
+                    subjectId: {
+                      [Op.in]: groupIds,
+                    },
+                  },
+                ]
+              : []),
           ],
-        }),
-        UserMembership.findOne({
-          where: {
-            userId: user.id,
-            documentId: parentDocumentId,
-          },
-        }),
-      ]);
+        },
+      });
 
-      if (groupMembership || membership) {
+      if (directDocumentPermission) {
         remove(where[Op.and], (cond) => has(cond, "collectionId"));
       }
 
@@ -257,7 +277,7 @@ router.post(
             [Op.or]: [
               // Only ever include draft results for the user's own documents
               { createdById: user.id },
-              { "$memberships.id$": { [Op.ne]: null } },
+              { "$permissionGrants.id$": { [Op.ne]: null } },
             ],
           },
         ],
@@ -297,7 +317,7 @@ router.post(
     // When sorting by index, pagination is already handled by slicing documentIds,
     // so we skip the SQL-level offset to avoid double-pagination
     const [documents, total] = await Promise.all([
-      Document.withMembershipScope(user.id).findAll({
+      Document.withPermissionScope(user.id).findAll({
         where,
         order: orderClause as Order,
         offset: sort === "index" ? 0 : ctx.state.pagination.offset,
@@ -321,7 +341,7 @@ router.post(
 
 router.post(
   "documents.archived",
-  auth({ role: UserRole.Member }),
+  auth({ role: UserRole.Editor }),
   pagination(),
   validate(T.DocumentsArchivedSchema),
   async (ctx: APIContext<T.DocumentsArchivedReq>) => {
@@ -358,7 +378,7 @@ router.post(
       };
     }
 
-    const documents = await Document.withMembershipScope(user.id).findAll({
+    const documents = await Document.withPermissionScope(user.id).findAll({
       where,
       order: [[sort, direction]],
       offset: ctx.state.pagination.offset,
@@ -380,7 +400,7 @@ router.post(
 
 router.post(
   "documents.deleted",
-  auth({ role: UserRole.Member }),
+  auth({ role: UserRole.Editor }),
   pagination(),
   validate(T.DocumentsDeletedSchema),
   async (ctx: APIContext<T.DocumentsDeletedReq>) => {
@@ -389,14 +409,14 @@ router.post(
     const collectionIds = await user.collectionIds({
       paranoid: false,
     });
-    const membershipScope: Readonly<ScopeOptions> = {
-      method: ["withMembership", user.id],
+    const permissionGrantScope: Readonly<ScopeOptions> = {
+      method: ["withPermissionGrants", user.id],
     };
     const viewScope: Readonly<ScopeOptions> = {
       method: ["withViews", user.id],
     };
     const documents = await Document.scope([
-      membershipScope,
+      permissionGrantScope,
       viewScope,
       "withDrafts",
     ]).findAll({
@@ -456,7 +476,7 @@ router.post(
         {
           model: Document.scope([
             "withDrafts",
-            { method: ["withMembership", userId] },
+            { method: ["withPermissionGrants", userId] },
           ]),
           required: true,
           where: {
@@ -525,7 +545,7 @@ router.post(
       delete where.updatedAt;
     }
 
-    const documents = await Document.withMembershipScope(user.id, {
+    const documents = await Document.withPermissionScope(user.id, {
       includeDrafts: true,
     }).findAll({
       where,
@@ -575,7 +595,7 @@ router.post(
         throw NotFoundError("Document could not be found for shareId");
       }
 
-      // reload with membership scope if user is authenticated
+      // reload with permission grant scope if user is authenticated
       if (user) {
         document = await Document.findByPk(document.id, {
           userId: user.id,
@@ -648,31 +668,85 @@ router.post(
       },
     };
 
-    const [collection, memberIds, collectionMemberIds] = await Promise.all([
-      document.$get("collection"),
-      Document.membershipUserIds(document.id),
-      document.collectionId
-        ? Collection.membershipUserIds(document.collectionId)
-        : [],
-    ]);
-
-    where = {
-      ...where,
-      [Op.or]: [
-        {
-          id: {
-            [Op.in]: uniq([...memberIds, ...collectionMemberIds]),
+    const [collection, documentPermissions, collectionPermissions] =
+      await Promise.all([
+        document.$get("collection"),
+        Permission.findAll({
+          attributes: ["subjectType", "subjectId"],
+          where: {
+            teamId: document.teamId,
+            deletedAt: null,
+            resourceType: PermissionResourceType.Document,
+            resourceId: document.id,
+            subjectType: {
+              [Op.in]: [
+                PermissionSubjectType.User,
+                PermissionSubjectType.Group,
+              ],
+            },
           },
-        },
-        collection?.permission
-          ? {
-              role: {
-                [Op.ne]: UserRole.Guest,
+        }),
+        document.collectionId
+          ? Permission.findAll({
+              attributes: ["subjectType", "subjectId"],
+              where: {
+                teamId: document.teamId,
+                deletedAt: null,
+                resourceType: PermissionResourceType.Collection,
+                resourceId: document.collectionId,
+                subjectType: {
+                  [Op.in]: [
+                    PermissionSubjectType.User,
+                    PermissionSubjectType.Group,
+                  ],
+                },
               },
-            }
-          : {},
-      ],
-    };
+            })
+          : Promise.resolve([]),
+      ]);
+
+    if (!collection?.permission) {
+      const grants = [...documentPermissions, ...collectionPermissions];
+      const groupIds = uniq(
+        grants
+          .filter(
+            (permission) =>
+              permission.subjectType === PermissionSubjectType.Group &&
+              !!permission.subjectId
+          )
+          .map((permission) => permission.subjectId as string)
+      );
+
+      const groupUsers = groupIds.length
+        ? await GroupUser.findAll({
+            attributes: ["userId"],
+            raw: true,
+            where: {
+              groupId: {
+                [Op.in]: groupIds,
+              },
+            },
+          })
+        : [];
+
+      const permissionUserIds = uniq([
+        ...grants
+          .filter(
+            (permission) =>
+              permission.subjectType === PermissionSubjectType.User &&
+              !!permission.subjectId
+          )
+          .map((permission) => permission.subjectId as string),
+        ...groupUsers.map((groupUser) => groupUser.userId),
+      ]);
+
+      where = {
+        ...where,
+        id: {
+          [Op.in]: permissionUserIds,
+        },
+      };
+    }
 
     if (query) {
       where = {
@@ -733,6 +807,30 @@ router.post(
 
     ctx.body = {
       data: documentTree,
+    };
+  }
+);
+
+router.post(
+  "documents.permissions",
+  auth(),
+  validate(T.DocumentsPermissionsSchema),
+  async (ctx: APIContext<T.DocumentsPermissionsReq>) => {
+    const { id } = ctx.input.body;
+    const { user } = ctx.state.auth;
+    const document = await Document.findByPk(id, {
+      userId: user.id,
+      rejectOnEmpty: true,
+    });
+
+    authorize(user, "read", document);
+
+    ctx.body = {
+      data: await PermissionResolver.resolveForDocument({
+        teamId: user.teamId,
+        documentId: document.id,
+        collectionId: document.collectionId ?? null,
+      }),
     };
   }
 );
@@ -910,7 +1008,7 @@ router.post(
 
 router.post(
   "documents.restore",
-  auth({ role: UserRole.Member }),
+  auth({ role: UserRole.Editor }),
   validate(T.DocumentsRestoreSchema),
   transaction(),
   async (ctx: APIContext<T.DocumentsRestoreReq>) => {
@@ -1084,7 +1182,7 @@ router.post(
       share = result.share;
       let { collection, document } = result; // One of collection or document should be available
 
-      // reload with membership scope if user is authenticated
+      // reload with permission grant scope if user is authenticated
       if (user) {
         collection = collection
           ? await Collection.findByPk(collection.id, { userId: user.id })
@@ -1203,7 +1301,7 @@ router.post(
 
 router.post(
   "documents.templatize",
-  auth({ role: UserRole.Member }),
+  auth({ role: UserRole.Editor }),
   rateLimiter(RateLimiterStrategy.TwentyFivePerMinute),
   validate(T.DocumentsTemplatizeSchema),
   transaction(),
@@ -1757,60 +1855,49 @@ router.post(
     authorize(actor, "manageUsers", document);
     authorize(actor, "read", user);
 
-    const UserMemberships = await UserMembership.findAll({
+    const resolvedPermission = permission || user.defaultDocumentPermission;
+
+    await Permission.destroy({
       where: {
-        userId,
+        teamId: actor.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: userId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
       },
-      attributes: ["id", "index", "updatedAt"],
-      limit: 1,
-      order: [
-        // using LC_COLLATE:"C" because we need byte order to drive the sorting
-        // find only the first star so we can create an index before it
-        Sequelize.literal('"user_permission"."index" collate "C"'),
-        ["updatedAt", "DESC"],
-      ],
+      force: false,
       transaction,
     });
-
-    // create membership at the beginning of their "Shared with me" section
-    const index = fractionalIndex(
-      null,
-      UserMemberships.length ? UserMemberships[0].index : null
-    );
-
-    let membership = await UserMembership.findOne({
-      where: {
-        documentId: id,
-        userId,
+    const permissionGrant = await Permission.create(
+      {
+        teamId: actor.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: userId,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
+        permission: documentPermissionToLevel(resolvedPermission),
+        inheritMode: PermissionInheritMode.Self,
+        grantedById: actor.id,
       },
-      lock: transaction.LOCK.UPDATE,
-      ...ctx.context,
-    });
-
-    if (membership) {
-      if (permission) {
-        membership.permission = permission;
-        // disconnect from the source if the permission is manually updated
-        membership.sourceId = null;
-        await membership.save(ctx.context);
-      }
-    } else {
-      membership = await UserMembership.create(
-        {
-          documentId: id,
-          userId,
-          index,
-          permission: permission || user.defaultDocumentPermission,
-          createdById: actor.id,
-        },
-        ctx.context
-      );
-    }
+      ctx.context
+    );
 
     ctx.body = {
       data: {
         users: [presentUser(user)],
-        memberships: [presentMembership(membership)],
+        memberships: [
+          {
+            id: permissionGrant.id,
+            userId,
+            documentId: id,
+            collectionId: null,
+            permission: resolvedPermission,
+            createdById: actor.id,
+            sourceId: null,
+            index: null,
+          },
+        ],
       },
     };
   }
@@ -1843,17 +1930,32 @@ router.post(
       authorize(actor, "read", user);
     }
 
-    const membership = await UserMembership.findOne({
+    const grant = await Permission.findOne({
       where: {
-        documentId: id,
-        userId,
+        teamId: actor.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: userId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
       },
       transaction,
       lock: transaction.LOCK.UPDATE,
       rejectOnEmpty: true,
     });
 
-    await membership.destroy(ctx.context);
+    await grant.destroy(ctx.context);
+
+    await Permission.destroy({
+      where: {
+        teamId: actor.teamId,
+        subjectType: PermissionSubjectType.User,
+        subjectId: userId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
+      },
+      force: false,
+      transaction,
+    });
 
     ctx.body = {
       success: true,
@@ -1885,37 +1987,46 @@ router.post(
     authorize(user, "manageUsers", document);
     authorize(user, "read", group);
 
-    let membership = await GroupMembership.findOne({
-      where: {
-        documentId: id,
-        groupId,
-      },
-      lock: transaction.LOCK.UPDATE,
-      ...ctx.context,
-    });
+    const resolvedPermission = permission || user.defaultDocumentPermission;
 
-    if (membership) {
-      if (permission) {
-        membership.permission = permission;
-        // disconnect from the source if the permission is manually updated
-        membership.sourceId = null;
-        await membership.save(ctx.context);
-      }
-    } else {
-      membership = await GroupMembership.create(
-        {
-          documentId: id,
-          groupId,
-          permission: permission || user.defaultDocumentPermission,
-          createdById: user.id,
-        },
-        ctx.context
-      );
-    }
+    await Permission.destroy({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: groupId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
+      },
+      force: false,
+      transaction,
+    });
+    const permissionGrant = await Permission.create(
+      {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: groupId,
+        subjectRole: null,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
+        permission: documentPermissionToLevel(resolvedPermission),
+        inheritMode: PermissionInheritMode.Self,
+        grantedById: user.id,
+      },
+      ctx.context
+    );
 
     ctx.body = {
       data: {
-        groupMemberships: [presentGroupMembership(membership)],
+        groupMemberships: [
+          {
+            id: permissionGrant.id,
+            groupId,
+            documentId: id,
+            collectionId: null,
+            permission: resolvedPermission,
+            sourceId: null,
+          },
+        ],
       },
     };
   }
@@ -1945,17 +2056,32 @@ router.post(
     authorize(user, "manageUsers", document);
     authorize(user, "read", group);
 
-    const membership = await GroupMembership.findOne({
+    const grant = await Permission.findOne({
       where: {
-        documentId: id,
-        groupId,
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: groupId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
       },
       transaction,
       lock: transaction.LOCK.UPDATE,
       rejectOnEmpty: true,
     });
 
-    await membership.destroy(ctx.context);
+    await grant.destroy(ctx.context);
+
+    await Permission.destroy({
+      where: {
+        teamId: user.teamId,
+        subjectType: PermissionSubjectType.Group,
+        subjectId: groupId,
+        resourceType: PermissionResourceType.Document,
+        resourceId: id,
+      },
+      force: false,
+      transaction,
+    });
 
     ctx.body = {
       success: true,
@@ -1975,50 +2101,87 @@ router.post(
     const document = await Document.findByPk(id, { userId: actor.id });
     authorize(actor, "update", document);
 
-    let where: WhereOptions<UserMembership> = {
-      documentId: id,
+    let where: WhereOptions<Permission> = {
+      teamId: actor.teamId,
+      subjectType: PermissionSubjectType.User,
+      resourceType: PermissionResourceType.Document,
+      resourceId: id,
+      deletedAt: null,
     };
-    let userWhere;
+    const filteredUserIds = query
+      ? (
+          await User.findAll({
+            where: {
+              teamId: actor.teamId,
+              name: { [Op.iLike]: `%${query}%` },
+            },
+            attributes: ["id"],
+          })
+        ).map((subjectUser) => subjectUser.id)
+      : null;
 
-    if (query) {
-      userWhere = {
-        name: {
-          [Op.iLike]: `%${query}%`,
-        },
+    if (permission) {
+      where = {
+        ...where,
+        permission: documentPermissionToLevel(permission),
+      };
+    }
+    if (filteredUserIds) {
+      where = {
+        ...where,
+        subjectId: filteredUserIds.length
+          ? {
+              [Op.in]: filteredUserIds,
+            }
+          : null,
       };
     }
 
-    if (permission) {
-      where = { ...where, permission };
-    }
-
-    const options = {
-      where,
-      include: [
-        {
-          model: User,
-          as: "user",
-          where: userWhere,
-          required: true,
-        },
-      ],
-    };
-
     const [total, memberships] = await Promise.all([
-      UserMembership.count(options),
-      UserMembership.findAll({
-        ...options,
+      Permission.count({ where }),
+      Permission.findAll({
+        where,
         order: [["createdAt", "DESC"]],
         offset: ctx.state.pagination.offset,
         limit: ctx.state.pagination.limit,
       }),
     ]);
+    const userIds = memberships
+      .map((membership) => membership.subjectId)
+      .filter(Boolean) as string[];
+    const users = userIds.length
+      ? await User.findAll({
+          where: {
+            id: userIds,
+            teamId: actor.teamId,
+          },
+          paranoid: false,
+        })
+      : [];
+    const usersById = new Map(
+      users.map((subjectUser) => [subjectUser.id, subjectUser])
+    );
+
+    const visibleMemberships = memberships.filter((membership) =>
+      usersById.has(membership.subjectId ?? "")
+    );
 
     ctx.body = {
       pagination: { ...ctx.state.pagination, total },
       data: {
-        memberships: memberships.map(presentMembership),
-        users: memberships.map((membership) => presentUser(membership.user)),
+        memberships: visibleMemberships.map((membership) => ({
+          id: membership.id,
+          userId: membership.subjectId!,
+          documentId: membership.resourceId,
+          collectionId: null,
+          permission: levelToDocumentPermission(membership.permission),
+          createdById: membership.grantedById,
+          sourceId: null,
+          index: null,
+        })),
+        users: visibleMemberships.map((membership) =>
+          presentUser(usersById.get(membership.subjectId!)!)
+        ),
       },
     };
   }
@@ -2036,53 +2199,84 @@ router.post(
     const document = await Document.findByPk(id, { userId: user.id });
     authorize(user, "update", document);
 
-    let where: WhereOptions<GroupMembership> = {
-      documentId: id,
+    let where: WhereOptions<Permission> = {
+      teamId: user.teamId,
+      subjectType: PermissionSubjectType.Group,
+      resourceType: PermissionResourceType.Document,
+      resourceId: id,
+      deletedAt: null,
     };
-    let groupWhere;
+    const filteredGroupIds = query
+      ? (
+          await Group.findAll({
+            where: {
+              teamId: user.teamId,
+              name: { [Op.iLike]: `%${query}%` },
+            },
+            attributes: ["id"],
+          })
+        ).map((group) => group.id)
+      : null;
 
-    if (query) {
-      groupWhere = {
-        name: {
-          [Op.iLike]: `%${query}%`,
-        },
+    if (permission) {
+      where = {
+        ...where,
+        permission: documentPermissionToLevel(permission),
+      };
+    }
+    if (filteredGroupIds) {
+      where = {
+        ...where,
+        subjectId: filteredGroupIds.length
+          ? {
+              [Op.in]: filteredGroupIds,
+            }
+          : null,
       };
     }
 
-    if (permission) {
-      where = { ...where, permission };
-    }
-
-    const options = {
-      where,
-      include: [
-        {
-          model: Group,
-          as: "group",
-          where: groupWhere,
-          required: true,
-        },
-      ],
-    };
-
     const [total, memberships] = await Promise.all([
-      GroupMembership.count(options),
-      GroupMembership.findAll({
-        ...options,
+      Permission.count({ where }),
+      Permission.findAll({
+        where,
         order: [["createdAt", "DESC"]],
         offset: ctx.state.pagination.offset,
         limit: ctx.state.pagination.limit,
       }),
     ]);
-
-    const groupMemberships = memberships.map(presentGroupMembership);
+    const groupIds = memberships
+      .map((membership) => membership.subjectId)
+      .filter(Boolean) as string[];
+    const groups = groupIds.length
+      ? await Group.findAll({
+          where: {
+            id: groupIds,
+            teamId: user.teamId,
+          },
+          paranoid: false,
+        })
+      : [];
+    const groupsById = new Map(groups.map((group) => [group.id, group]));
+    const visibleMemberships = memberships.filter((membership) =>
+      groupsById.has(membership.subjectId ?? "")
+    );
+    const groupMemberships = visibleMemberships.map((membership) => ({
+      id: membership.id,
+      groupId: membership.subjectId!,
+      documentId: membership.resourceId,
+      collectionId: null,
+      permission: levelToDocumentPermission(membership.permission),
+      sourceId: null,
+    }));
 
     ctx.body = {
       pagination: { ...ctx.state.pagination, total },
       data: {
         groupMemberships,
         groups: await Promise.all(
-          memberships.map((membership) => presentGroup(membership.group))
+          visibleMemberships.map((membership) =>
+            presentGroup(groupsById.get(membership.subjectId!)!)
+          )
         ),
       },
     };

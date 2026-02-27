@@ -1,13 +1,16 @@
 import invariant from "invariant";
 import { DocumentPermission, TeamPreference } from "@shared/types";
 import { Document, Revision, User, Team } from "@server/models";
+import type { Permission } from "@server/models";
+import {
+  PermissionLevel,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import { allow, cannot, can } from "./cancan";
 import { and, isTeamAdmin, isTeamModel, isTeamMutable, or } from "./utils";
 
 allow(User, "createDocument", Team, (actor, document) =>
   and(
-    //
-    !actor.isGuest,
     !actor.isViewer,
     isTeamModel(actor, document),
     isTeamMutable(actor)
@@ -18,10 +21,10 @@ allow(User, "read", Document, (actor, document) =>
   and(
     isTeamModel(actor, document),
     or(
-      includesMembership(document, [
+      includesPermission(document, actor, [
         DocumentPermission.Read,
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
+        DocumentPermission.Edit,
+        DocumentPermission.Manage,
       ]),
       and(!!document?.isDraft, actor.id === document?.createdById),
       can(actor, "readDocument", document?.collection)
@@ -30,17 +33,14 @@ allow(User, "read", Document, (actor, document) =>
 );
 
 allow(User, ["listRevisions", "listViews"], Document, (actor, document) =>
-  or(
-    and(!actor.isGuest, can(actor, "read", document)),
-    and(actor.isGuest, can(actor, "update", document))
-  )
+  can(actor, "read", document)
 );
 
 allow(User, "download", Document, (actor, document) =>
   and(
     can(actor, "read", document),
     or(
-      and(!actor.isGuest, !actor.isViewer),
+      !actor.isViewer,
       !!actor.team.getPreference(TeamPreference.ViewersCanExport)
     )
   )
@@ -51,10 +51,7 @@ allow(User, "comment", Document, (actor, document) =>
     !!document?.isActive,
     isTeamMutable(actor),
     // TODO: We'll introduce a separate permission for commenting
-    or(
-      and(!actor.isGuest, can(actor, "read", document)),
-      and(actor.isGuest, can(actor, "update", document))
-    ),
+    can(actor, "read", document),
     or(!document?.collection, document?.collection?.commenting !== false)
   )
 );
@@ -73,9 +70,10 @@ allow(
 allow(User, "share", Document, (actor, document) =>
   and(
     !!document?.isActive,
+    !actor.isViewer,
     isTeamMutable(actor),
-    can(actor, "read", document),
-    or(!document?.collection, can(actor, "share", document?.collection))
+    can(actor, "manageUsers", document),
+    or(!document?.collection, document?.collection?.sharing !== false)
   )
 );
 
@@ -85,9 +83,9 @@ allow(User, "update", Document, (actor, document) =>
     isTeamMutable(actor),
     can(actor, "read", document),
     or(
-      includesMembership(document, [
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
+      includesPermission(document, actor, [
+        DocumentPermission.Edit,
+        DocumentPermission.Manage,
       ]),
       or(
         can(actor, "updateDocument", document?.collection),
@@ -109,9 +107,8 @@ allow(User, "manageUsers", Document, (actor, document) =>
   and(
     can(actor, "update", document),
     or(
-      includesMembership(document, [DocumentPermission.Admin]),
-      and(isTeamAdmin(actor, document), can(actor, "read", document)),
-      can(actor, "updateDocument", document?.collection),
+      includesPermission(document, actor, [DocumentPermission.Manage]),
+      can(actor, "deleteDocument", document?.collection),
       !!document?.isDraft && actor.id === document?.createdById
     )
   )
@@ -121,9 +118,8 @@ allow(User, "duplicate", Document, (actor, document) =>
   and(
     can(actor, "update", document),
     or(
-      includesMembership(document, [DocumentPermission.Admin]),
-      and(isTeamAdmin(actor, document), can(actor, "read", document)),
-      can(actor, "updateDocument", document?.collection),
+      includesPermission(document, actor, [DocumentPermission.Manage]),
+      can(actor, "deleteDocument", document?.collection),
       !!document?.isDraft && actor.id === document?.createdById
     )
   )
@@ -133,9 +129,9 @@ allow(User, "move", Document, (actor, document) =>
   and(
     can(actor, "update", document),
     or(
-      includesMembership(document, [
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
+      includesPermission(document, actor, [
+        DocumentPermission.Edit,
+        DocumentPermission.Manage,
       ]),
       can(actor, "updateDocument", document?.collection),
       and(!!document?.isDraft && actor.id === document?.createdById),
@@ -155,7 +151,7 @@ allow(User, "createChildDocument", Document, (actor, document) =>
 allow(User, ["updateInsights", "pin", "unpin"], Document, (actor, document) =>
   and(
     !document?.isDraft,
-    !actor.isGuest,
+    !actor.isViewer,
     can(actor, "update", document),
     can(actor, "update", document?.collection)
   )
@@ -166,8 +162,12 @@ allow(User, "pinToHome", Document, (actor, document) =>
     //
     !document?.isDraft,
     !!document?.isActive,
-    isTeamAdmin(actor, document),
-    isTeamMutable(actor)
+    isTeamModel(actor, document),
+    isTeamMutable(actor),
+    or(
+      includesPermission(document, actor, [DocumentPermission.Manage]),
+      can(actor, "deleteDocument", document?.collection)
+    )
   )
 );
 
@@ -177,8 +177,8 @@ allow(User, "delete", Document, (actor, document) =>
     isTeamModel(actor, document),
     isTeamMutable(actor),
     or(
-      can(actor, "unarchive", document),
-      can(actor, "update", document),
+      can(actor, "deleteDocument", document?.collection),
+      includesPermission(document, actor, [DocumentPermission.Manage]),
       and(!document?.collection, actor.id === document?.createdById)
     )
   )
@@ -186,13 +186,13 @@ allow(User, "delete", Document, (actor, document) =>
 
 allow(User, "restore", Document, (actor, document) =>
   and(
-    !actor.isGuest,
+    !actor.isViewer,
     !!document?.isDeleted,
     isTeamModel(actor, document),
     or(
-      includesMembership(document, [
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
+      includesPermission(document, actor, [
+        DocumentPermission.Edit,
+        DocumentPermission.Manage,
       ]),
       can(actor, "updateDocument", document?.collection),
       and(!!document?.isDraft && actor.id === document?.createdById)
@@ -202,7 +202,7 @@ allow(User, "restore", Document, (actor, document) =>
 
 allow(User, "permanentDelete", Document, (actor, document) =>
   and(
-    !actor.isGuest,
+    !actor.isViewer,
     !!document?.isDeleted,
     isTeamModel(actor, document),
     isTeamAdmin(actor, document)
@@ -215,9 +215,8 @@ allow(User, "archive", Document, (actor, document) =>
     !!document?.isActive,
     can(actor, "update", document),
     or(
-      includesMembership(document, [DocumentPermission.Admin]),
-      and(isTeamAdmin(actor, document), can(actor, "read", document)),
-      can(actor, "updateDocument", document?.collection)
+      includesPermission(document, actor, [DocumentPermission.Manage]),
+      can(actor, "deleteDocument", document?.collection)
     )
   )
 );
@@ -229,9 +228,9 @@ allow(User, "unarchive", Document, (actor, document) =>
     !!document?.archivedAt,
     can(actor, "read", document),
     or(
-      includesMembership(document, [
-        DocumentPermission.ReadWrite,
-        DocumentPermission.Admin,
+      includesPermission(document, actor, [
+        DocumentPermission.Edit,
+        DocumentPermission.Manage,
       ]),
       can(actor, "updateDocument", document?.collection),
       and(!!document?.isDraft && actor.id === document?.createdById)
@@ -249,7 +248,6 @@ allow(
 allow(User, "unpublish", Document, (user, document) => {
   if (
     !document ||
-    user.isGuest ||
     user.isViewer ||
     !document.isActive ||
     document.isDraft
@@ -267,37 +265,48 @@ allow(User, "unpublish", Document, (user, document) => {
   return user.teamId === document.teamId;
 });
 
-function includesMembership(
+function includesPermission(
   document: Document | null,
+  user: User,
   permissions: DocumentPermission[]
 ) {
   if (!document) {
     return false;
   }
 
-  invariant(
-    document.memberships,
-    "Development: document memberships should be preloaded, did you forget withMembership scope?"
-  );
-  invariant(
-    document.groupMemberships,
-    "Development: document groupMemberships should be preloaded, did you forget withMembership scope?"
-  );
-
   const permissionSet = new Set(permissions);
-  const membershipIds: string[] = [];
+  const grantIds: string[] = [];
 
-  for (const membership of document.memberships) {
-    if (permissionSet.has(membership.permission as DocumentPermission)) {
-      membershipIds.push(membership.id);
+  const grants = document.permissionGrants ?? [];
+  for (const grant of grants as Permission[]) {
+    if (!matchesSubject(grant, user)) {
+      continue;
+    }
+
+    const mapped =
+      grant.permission === PermissionLevel.Manage
+        ? DocumentPermission.Manage
+        : grant.permission === PermissionLevel.Edit
+          ? DocumentPermission.Edit
+          : DocumentPermission.Read;
+
+    if (permissionSet.has(mapped)) {
+      grantIds.push(grant.id);
     }
   }
 
-  for (const membership of document.groupMemberships) {
-    if (permissionSet.has(membership.permission as DocumentPermission)) {
-      membershipIds.push(membership.id);
-    }
+  return grantIds.length > 0 ? grantIds : false;
+}
+
+function matchesSubject(grant: Permission, user: User) {
+  if (grant.subjectType === PermissionSubjectType.User) {
+    return grant.subjectId === user.id;
   }
 
-  return membershipIds.length > 0 ? membershipIds : false;
+  if (grant.subjectType === PermissionSubjectType.Role) {
+    return grant.subjectRole === user.role;
+  }
+
+  // Group grants are pre-filtered by Document.withPermissionGrants(userId)
+  return grant.subjectType === PermissionSubjectType.Group;
 }

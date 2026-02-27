@@ -1,10 +1,16 @@
 import { subDays } from "date-fns";
 import { Attachment, Document } from "@server/models";
-import DeleteAttachmentTask from "@server/queues/tasks/DeleteAttachmentTask";
 import { buildAttachment, buildDocument } from "@server/test/factories";
 import documentPermanentDeleter from "./documentPermanentDeleter";
 
-jest.mock("@server/queues/tasks/DeleteAttachmentTask");
+const mockDeleteAttachmentSchedule = jest.fn();
+
+jest.mock("@server/queues/tasks/DeleteAttachmentTask", () => ({
+  __esModule: true,
+  default: class MockDeleteAttachmentTask {
+    schedule = mockDeleteAttachmentSchedule;
+  },
+}));
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -62,9 +68,7 @@ describe("documentPermanentDeleter", () => {
     await document.save();
     const countDeletedDoc = await documentPermanentDeleter([document]);
     expect(countDeletedDoc).toEqual(1);
-    expect(
-      jest.mocked(DeleteAttachmentTask.prototype.schedule)
-    ).toHaveBeenCalledTimes(2);
+    expect(mockDeleteAttachmentSchedule).toHaveBeenCalledTimes(2);
     expect(
       await Document.unscoped().count({
         where: {

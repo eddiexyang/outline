@@ -5,6 +5,7 @@ import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { mergeRefs } from "react-merge-refs";
 import { useHistory } from "react-router-dom";
+import { toast } from "sonner";
 import { UserPreference } from "@shared/types";
 import { ProsemirrorHelper } from "@shared/utils/ProsemirrorHelper";
 import { CollectionValidation, DocumentValidation } from "@shared/validations";
@@ -70,10 +71,15 @@ const CollectionLink: React.FC<Props> = ({
   );
 
   const handleExpand = React.useCallback(() => {
+    if (!can.readDocument) {
+      toast.error(t("Permission denied. Contact your administrator"));
+      return;
+    }
+
     if (!expanded) {
       onDisclosureClick();
     }
-  }, [expanded, onDisclosureClick]);
+  }, [can.readDocument, expanded, onDisclosureClick, t]);
 
   const parentRef = React.useRef<HTMLDivElement>(null);
   const [{ isOver, canDrop }, dropRef] = useDropToChangeCollection(
@@ -126,18 +132,46 @@ const CollectionLink: React.FC<Props> = ({
     onRename: handleRename,
   });
 
+  const handleCollectionClick = React.useCallback(
+    (ev: React.MouseEvent<HTMLAnchorElement>) => {
+      if (can.readDocument) {
+        onClick?.();
+        return;
+      }
+
+      ev.preventDefault();
+      ev.stopPropagation();
+      toast.error(t("Permission denied. Contact your administrator"));
+    },
+    [can.readDocument, onClick, t]
+  );
+
+  const handleCollectionDisclosureClick = React.useCallback(
+    (ev?: React.MouseEvent<HTMLElement>) => {
+      if (can.readDocument) {
+        onDisclosureClick(ev);
+        return;
+      }
+
+      ev?.preventDefault();
+      ev?.stopPropagation();
+      toast.error(t("Permission denied. Contact your administrator"));
+    },
+    [can.readDocument, onDisclosureClick, t]
+  );
+
   return (
     <ActionContextProvider value={{ activeModels: [collection] }}>
       <Relative ref={mergeRefs([parentRef, dropRef])}>
         <DropToImport collectionId={collection.id}>
           <SidebarLink
-            onClick={onClick}
+            onClick={handleCollectionClick}
             to={{
               pathname: collection.path,
               state: { sidebarContext },
             }}
             expanded={expanded}
-            onDisclosureClick={onDisclosureClick}
+            onDisclosureClick={handleCollectionDisclosureClick}
             onClickIntent={handlePrefetch}
             contextAction={contextMenuAction}
             icon={

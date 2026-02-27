@@ -3,6 +3,13 @@ import {
   buildDocument,
   buildUser,
 } from "@server/test/factories";
+import { Permission } from "@server/models";
+import {
+  PermissionInheritMode,
+  PermissionLevel,
+  PermissionResourceType,
+  PermissionSubjectType,
+} from "@server/models/Permission";
 import { getTestServer } from "@server/test/support";
 
 const server = getTestServer();
@@ -37,8 +44,6 @@ describe("#userMemberships.list", () => {
         userId: member.id,
       },
     });
-    const users = await document.$get("users");
-    expect(users.length).toEqual(1);
     const res = await server.post("/api/userMemberships.list", {
       body: {
         token: member.getJwtToken(),
@@ -55,11 +60,58 @@ describe("#userMemberships.list", () => {
     expect(sharedDoc.id).toEqual(document.id);
     expect(sharedDoc.id).toEqual(body.data.memberships[0].documentId);
     expect(body.data.memberships[0].userId).toEqual(member.id);
-    expect(body.data.memberships[0].index).not.toBeFalsy();
+    expect(body.data.memberships[0].index).toBeNull();
     expect(body.policies).not.toBeFalsy();
-    expect(body.policies).toHaveLength(2);
-    expect(body.policies[1].abilities).not.toBeFalsy();
-    expect(body.policies[1].abilities.update).toBeTruthy();
+    expect(body.policies).toHaveLength(1);
+    expect(body.policies[0].abilities).not.toBeFalsy();
+    expect(body.policies[0].abilities.update).toBeTruthy();
+  });
+
+  it("should not return memberships for documents the user cannot load", async () => {
+    const user = await buildUser();
+    const member = await buildUser({
+      teamId: user.teamId,
+    });
+    const collection = await buildCollection({
+      teamId: user.teamId,
+      createdById: user.id,
+      permission: null,
+    });
+    const document = await buildDocument({
+      collectionId: collection.id,
+      createdById: user.id,
+      teamId: user.teamId,
+    });
+
+    await server.post("/api/documents.add_user", {
+      body: {
+        token: user.getJwtToken(),
+        id: document.id,
+        userId: member.id,
+      },
+    });
+    await Permission.create({
+      teamId: user.teamId,
+      subjectType: PermissionSubjectType.User,
+      subjectId: member.id,
+      subjectRole: null,
+      resourceType: PermissionResourceType.Document,
+      resourceId: "11111111-1111-4111-8111-111111111111",
+      permission: PermissionLevel.Read,
+      inheritMode: PermissionInheritMode.Self,
+      grantedById: user.id,
+    });
+
+    const res = await server.post("/api/userMemberships.list", {
+      body: {
+        token: member.getJwtToken(),
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(200);
+    expect(body.data.documents).toHaveLength(1);
+    expect(body.data.memberships).toHaveLength(1);
+    expect(body.data.memberships[0].documentId).toEqual(document.id);
   });
 });
 
@@ -91,8 +143,6 @@ describe("#userMemberships.update", () => {
     expect(respBody.data.memberships).not.toBeFalsy();
     expect(respBody.data.memberships).toHaveLength(1);
 
-    const users = await document.$get("users");
-    expect(users.length).toEqual(1);
     const res = await server.post("/api/userMemberships.update", {
       body: {
         token: member.getJwtToken(),
@@ -106,5 +156,52 @@ describe("#userMemberships.update", () => {
     expect(body.data.documentId).toEqual(document.id);
     expect(body.data.userId).toEqual(member.id);
     expect(body.data.index).toEqual("V");
+  });
+
+  it("should not allow updating another user's membership", async () => {
+    const owner = await buildUser();
+    const collection = await buildCollection({
+      teamId: owner.teamId,
+      createdById: owner.id,
+      permission: null,
+    });
+    const document = await buildDocument({
+      collectionId: collection.id,
+      createdById: owner.id,
+      teamId: owner.teamId,
+    });
+    const member = await buildUser({
+      teamId: owner.teamId,
+    });
+    const attacker = await buildUser({
+      teamId: owner.teamId,
+    });
+
+    const memberGrantRes = await server.post("/api/documents.add_user", {
+      body: {
+        token: owner.getJwtToken(),
+        id: document.id,
+        userId: member.id,
+      },
+    });
+    const attackerGrantRes = await server.post("/api/documents.add_user", {
+      body: {
+        token: owner.getJwtToken(),
+        id: document.id,
+        userId: attacker.id,
+      },
+    });
+    expect(attackerGrantRes.status).toEqual(200);
+
+    const memberGrantBody = await memberGrantRes.json();
+    const res = await server.post("/api/userMemberships.update", {
+      body: {
+        token: attacker.getJwtToken(),
+        id: memberGrantBody.data.memberships[0].id,
+        index: "V",
+      },
+    });
+
+    expect(res.status).toEqual(403);
   });
 });

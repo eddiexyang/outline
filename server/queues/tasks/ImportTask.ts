@@ -374,7 +374,7 @@ export default abstract class ImportTask extends BaseTask<Props> {
               (item.permission ??
               fileOperation.options?.permission !== undefined)
                 ? fileOperation.options?.permission
-                : CollectionPermission.ReadWrite,
+                : CollectionPermission.Edit,
             importId: fileOperation.id,
           };
 

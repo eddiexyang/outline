@@ -87,6 +87,14 @@ export default class GroupMembershipsStore extends Store<GroupMembership> {
         });
     invariant(res?.data, "Membership data should be available");
 
+    // The API replaces grants and returns a new permission id each update.
+    // Remove stale local entries for the same subject before adding the new one.
+    if (collectionId) {
+      this.removeAll({ collectionId, groupId });
+    } else {
+      this.removeAll({ documentId, groupId });
+    }
+
     const cgm = res.data.groupMemberships.map(this.add);
     return cgm[0];
   }

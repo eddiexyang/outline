@@ -59,6 +59,10 @@ export default class MembershipsStore extends Store<Membership> {
     invariant(res?.data, "Membership data should be available");
     res.data.users.forEach(this.rootStore.users.add);
 
+    // The API replaces grants and returns a new permission id each update.
+    // Remove stale local entries for the same subject before adding the new one.
+    this.removeAll({ collectionId, userId });
+
     const memberships = res.data.memberships.map(this.add);
     return memberships[0];
   }

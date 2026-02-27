@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { UserRole } from "@shared/types";
 import FilterOptions from "~/components/FilterOptions";
+import { userRoleLabelPlural } from "~/utils/userRoleLabels";
 
 type Props = {
   activeKey: string;
@@ -22,19 +23,19 @@ const UserRoleFilter = ({ activeKey, onSelect, ...rest }: Props) => {
         },
         {
           key: UserRole.Admin,
-          label: t("Admins"),
+          label: userRoleLabelPlural(UserRole.Admin, t),
         },
         {
           key: UserRole.Manager,
-          label: t("Managers"),
+          label: userRoleLabelPlural(UserRole.Manager, t),
         },
         {
           key: UserRole.Editor,
-          label: t("Editors"),
+          label: userRoleLabelPlural(UserRole.Editor, t),
         },
         {
           key: UserRole.Viewer,
-          label: t("Viewers"),
+          label: userRoleLabelPlural(UserRole.Viewer, t),
         },
       ]),
     [t]

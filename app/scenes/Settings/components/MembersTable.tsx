@@ -18,6 +18,7 @@ import Time from "~/components/Time";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useMobile from "~/hooks/useMobile";
 import UserMenu from "~/menus/UserMenu";
+import { userRoleLabel } from "~/utils/userRoleLabels";
 import { FILTER_HEIGHT } from "./StickyFilters";
 import { HStack } from "~/components/primitives/HStack";
 import { VStack } from "~/components/primitives/VStack";
@@ -123,13 +124,13 @@ export function MembersTable({ canManage, ...rest }: Props) {
             <HStack spacing={4} wrap>
               {!user.lastActiveAt && <Badge>{t("Invited")}</Badge>}
               {user.isAdmin ? (
-                <Badge primary>{t("Admin")}</Badge>
+                <Badge primary>{userRoleLabel(user.role, t)}</Badge>
               ) : user.isManager ? (
-                <Badge>{t("Manager")}</Badge>
+                <Badge>{userRoleLabel(user.role, t)}</Badge>
               ) : user.isViewer ? (
-                <Badge>{t("Viewer")}</Badge>
+                <Badge>{userRoleLabel(user.role, t)}</Badge>
               ) : (
-                <Badge>{t("Editor")}</Badge>
+                <Badge>{userRoleLabel(user.role, t)}</Badge>
               )}
               {user.isSuspended && <Badge>{t("Suspended")}</Badge>}
             </HStack>

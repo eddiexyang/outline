@@ -30,6 +30,7 @@ import useStores from "~/hooks/useStores";
 import InputMemberPermissionSelect from "~/components/InputMemberPermissionSelect";
 import { GroupPermission } from "@shared/types";
 import { GroupValidation } from "@shared/validations";
+import { userRoleLabel } from "~/utils/userRoleLabels";
 import type { Permission } from "~/types";
 import { EmptySelectValue } from "~/types";
 import type GroupUser from "~/models/GroupUser";
@@ -583,7 +584,11 @@ const GroupMemberListItem = observer(function ({
             t("Never signed in")
           )}
           {user.isInvited && <Badge>{t("Invited")}</Badge>}
-          {user.isAdmin && <Badge primary={user.isAdmin}>{t("Admin")}</Badge>}
+          {user.isAdmin && (
+            <Badge primary={user.isAdmin}>
+              {userRoleLabel(user.role, t)}
+            </Badge>
+          )}
         </>
       }
       image={<Avatar model={user} size={AvatarSize.Large} />}

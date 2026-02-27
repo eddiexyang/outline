@@ -8,6 +8,7 @@ import Input from "~/components/Input";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useStores from "~/hooks/useStores";
 import { client } from "~/utils/ApiClient";
+import { userRoleLabel } from "~/utils/userRoleLabels";
 import Text from "./Text";
 
 type Props = {
@@ -51,7 +52,7 @@ export function UserChangeRoleDialog({
   return (
     <ConfirmationDialog onSubmit={handleSubmit} savingText={`${t("Saving")}…`}>
       {t("Are you sure you want to make {{ userName }} a {{ role }}?", {
-        role,
+        role: userRoleLabel(role, t),
         userName: user.name,
       })}{" "}
       {accessNote}

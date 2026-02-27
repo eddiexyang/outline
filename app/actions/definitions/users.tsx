@@ -4,6 +4,7 @@ import { UserRoleHelper } from "@shared/utils/UserRoleHelper";
 import stores from "~/stores";
 import type User from "~/models/User";
 import Invite from "~/scenes/Invite";
+import { userRoleLabel } from "~/utils/userRoleLabels";
 import {
   UserChangeRoleDialog,
   UserDeleteDialog,
@@ -33,10 +34,10 @@ export const updateUserRoleActionFactory = (user: User, role: UserRole) =>
     name: ({ t }) =>
       UserRoleHelper.isRoleHigher(role, user!.role)
         ? `${t("Promote to {{ role }}", {
-            role: UserRoleHelper.displayName(role, t),
+            role: userRoleLabel(role, t),
           })}…`
         : `${t("Demote to {{ role }}", {
-            role: UserRoleHelper.displayName(role, t),
+            role: userRoleLabel(role, t),
           })}…`,
     analyticsName: "Update user role",
     section: UserSection,

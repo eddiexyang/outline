@@ -1,6 +1,5 @@
 import { observer } from "mobx-react";
 import { PlusIcon } from "outline-icons";
-import pluralize from "pluralize";
 import * as React from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -21,6 +20,7 @@ import useCurrentTeam from "~/hooks/useCurrentTeam";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
+import { userRoleLabel, userRoleLabelPlural } from "~/utils/userRoleLabels";
 
 type Props = {
   onSubmit: () => void;
@@ -112,7 +112,7 @@ function Invite({ onSubmit }: Props) {
     [handleAdd]
   );
 
-  const roleName = pluralize(role);
+  const roleName = userRoleLabelPlural(role, t);
   const collectionCount = collections.nonPrivate.length;
   const collectionAccessNote = collectionCount ? (
     <span>
@@ -140,13 +140,13 @@ function Invite({ onSubmit }: Props) {
     if (user.isAdmin) {
       memo.push({
         type: "item",
-        label: t("Admin"),
+        label: userRoleLabel(UserRole.Admin, t),
         description: t("Can manage all workspace settings"),
         value: UserRole.Admin,
       });
       memo.push({
         type: "item",
-        label: t("Manager"),
+        label: userRoleLabel(UserRole.Manager, t),
         description: t("Can manage collections and permissions"),
         value: UserRole.Manager,
       });
@@ -156,13 +156,13 @@ function Invite({ onSubmit }: Props) {
       ...memo,
       {
         type: "item",
-        label: t("Editor"),
+        label: userRoleLabel(UserRole.Editor, t),
         description: t("Can create, edit, and delete documents"),
         value: UserRole.Editor,
       },
       {
         type: "item",
-        label: t("Viewer"),
+        label: userRoleLabel(UserRole.Viewer, t),
         description: t("Can view and comment"),
         value: UserRole.Viewer,
       },

@@ -79,17 +79,7 @@ $ node ./build/server/scripts/20210226232041-migrate-authentication.js
 }
 
 export async function printEnv() {
-  if (env.isProduction) {
-    Logger.info(
-      "lifecycle",
-      styleText(
-        "green",
-        `
-Is your team enjoying Outline? Consider supporting future development by sponsoring the project:\n\nhttps://github.com/sponsors/outline
-`
-      )
-    );
-  } else if (env.isDevelopment) {
+  if (env.isDevelopment) {
     Logger.warn(
       `Running Outline in ${styleText(
         "bold",

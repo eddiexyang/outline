@@ -87,45 +87,12 @@ const FilterOptions = ({
   const filteredOptions = React.useMemo(() => {
     const normalizedQuery = deburr(query.toLowerCase());
 
-    const filtered = query
+    return query
       ? options.filter((option) =>
           deburr(option.label).toLowerCase().includes(normalizedQuery)
         )
       : options;
-
-    return filtered.sort((a, b) => {
-      const aSelected = selectedKeys.includes(a.key);
-      const bSelected = selectedKeys.includes(b.key);
-
-      // Selected items come first
-      if (aSelected && !bSelected) {
-        return -1;
-      }
-      if (!aSelected && bSelected) {
-        return 1;
-      }
-
-      // If both have the same selection state and there's a query,
-      // sort options starting with query first
-      if (query) {
-        const aStartsWith = deburr(a.label)
-          .toLowerCase()
-          .startsWith(normalizedQuery);
-        const bStartsWith = deburr(b.label)
-          .toLowerCase()
-          .startsWith(normalizedQuery);
-
-        if (aStartsWith && !bStartsWith) {
-          return -1;
-        }
-        if (!aStartsWith && bStartsWith) {
-          return 1;
-        }
-      }
-
-      return 0;
-    });
-  }, [options, query, selectedKeys]);
+  }, [options, query]);
 
   const handleKeyDown = React.useCallback(
     (ev: React.KeyboardEvent) => {

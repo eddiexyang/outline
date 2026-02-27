@@ -50,7 +50,6 @@ import { DocumentValidation } from "@shared/validations";
 import { InvalidRequestError, ValidationError } from "@server/errors";
 import { generateUrlId } from "@server/utils/url";
 import { createContext } from "@server/context";
-import { sequelize } from "@server/storage/database";
 import Collection from "./Collection";
 import FileOperation from "./FileOperation";
 import Import from "./Import";
@@ -180,7 +179,7 @@ type AdditionalFindOptions = {
       return {};
     }
 
-    const escapedUserId = sequelize.escape(userId);
+    const escapedUserId = `'${userId.replace(/'/g, "''")}'`;
 
     return {
       include: [

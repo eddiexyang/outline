@@ -58,7 +58,6 @@ import slugify from "@shared/utils/slugify";
 import { CollectionValidation } from "@shared/validations";
 import { ValidationError } from "@server/errors";
 import type { APIContext } from "@server/types";
-import { sequelize } from "@server/storage/database";
 import { CacheHelper } from "@server/utils/CacheHelper";
 import { RedisPrefixHelper } from "@server/utils/RedisPrefixHelper";
 import removeIndexCollision from "@server/utils/removeIndexCollision";
@@ -143,7 +142,7 @@ type AdditionalFindOptions = {
       return {};
     }
 
-    const escapedUserId = sequelize.escape(userId);
+    const escapedUserId = `'${userId.replace(/'/g, "''")}'`;
 
     return {
       include: [
